@@ -126,7 +126,7 @@ uint8_t F407_DMA_StreamIsEnabled(uint32_t streamBase)
  */
 void F407_DMA_ClearStreamFlags(uint8_t streamNum)
 {
-    uint32_t mask = F407_DMA_CLR_MASK(streamNum);
+    uint32_t mask = F407_DMA_GetClearMask(streamNum);
 
     if (streamNum <= 3U)
     {
@@ -143,7 +143,7 @@ void F407_DMA_ClearStreamFlags(uint8_t streamNum)
  */
 void F407_DMA_WaitForComplete(uint8_t streamNum)
 {
-    uint32_t tcif = F407_DMA_TCIF(streamNum);
+    uint32_t tcif = F407_DMA_GetTCIF(streamNum);
 
     if (streamNum <= 3U)
     {

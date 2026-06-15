@@ -5,6 +5,7 @@
 #include "My_Usart/My_Usart.h"
 #include "Control/Control.h"
 #include "Dshot.h"
+#include "Motor.h"
 
 /* 程序运行的时间戳（s） */
 uint32_t Timer_Bsp_t = 0;
@@ -20,6 +21,7 @@ volatile uint8_t print_task_flag = 0;
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
 	static uint8_t pid_2ms_tick = 0U;
+	static uint8_t DShot_tick = 0U;
 
 	if (id != API_TIM1)
 	{
@@ -27,11 +29,16 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 	}
 
 	pid_2ms_tick++;
+	DShot_tick++;
 
 	if (pid_2ms_tick >= 2U)
 	{
 		pid_2ms_tick = 0U;
 		pid_task_flag = 1U;
+	}
+	if (DShot_tick >= 10)
+	{
+		DShot_tick = 0U;
 	}
 }
 

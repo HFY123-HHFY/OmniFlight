@@ -26,6 +26,7 @@
 #include "LED.h"
 #include "MPU6050.h"
 #include "MPU6050_Int.h"
+#include "Motor.h"
 #include "QMC5883P.h"
 #include "BMP280.h"
 #include "Dshot.h" /* DShot协议 初始化 */
@@ -79,9 +80,9 @@ int main(void)
 	while (1)
 	{
 /* MPU6050 DMP */
-		mpu_angle();
-		Angle_XY = QMC_Data();
-		alt = BMP_Data();
+		// mpu_angle();
+		// Angle_XY = QMC_Data();
+		// alt = BMP_Data();
 
 /* 串级PID控制 - 2ms 姿态环*/
 		if (pid_task_flag != 0U)   // 500Hz 姿态环
@@ -93,14 +94,17 @@ int main(void)
 /* 和遥控器通信 */
 		NRF24L01_Data();
 
+		DShot_Write(speed_temp,speed_temp,speed_temp,speed_temp);
+
 	/* 串口数据打印 */
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
-			usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
+			// usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
 			// usart_printf(USART1, "Timer_Bsp_t: %lu\r\n", Timer_Bsp_t);
 			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}
+
 	}
 }

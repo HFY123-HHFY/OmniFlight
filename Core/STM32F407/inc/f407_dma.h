@@ -67,14 +67,73 @@ typedef struct
 
 /* ====== HISR / HIFCR 中断标志位 ====== */
 
-/* 根据 Stream 编号获取 TCIF 标志位 */
-#define F407_DMA_TCIF(stream)       (1UL << ((stream) >= 4U ? (((stream) - 4U) * 6U + 16U) : ((stream) * 6U)))
-#define F407_DMA_HTIF(stream)       (1UL << ((stream) >= 4U ? (((stream) - 4U) * 6U + 18U) : ((stream) * 6U + 2U)))
-#define F407_DMA_TEIF(stream)       (1UL << ((stream) >= 4U ? (((stream) - 4U) * 6U + 20U) : ((stream) * 6U + 4U)))
-#define F407_DMA_DMEIF(stream)      (1UL << ((stream) >= 4U ? (((stream) - 4U) * 6U + 21U) : ((stream) * 6U + 5U)))
-#define F407_DMA_FEIF(stream)       (1UL << ((stream) >= 4U ? (((stream) - 4U) * 6U + 22U) : ((stream) * 6U + 6U)))
-#define F407_DMA_CLR_MASK(stream)   (F407_DMA_TCIF(stream) | F407_DMA_HTIF(stream) | \
-                                     F407_DMA_TEIF(stream) | F407_DMA_DMEIF(stream) | F407_DMA_FEIF(stream))
+/*
+ * STM32F4 DMA 标志位不遵循线性偏移规律，使用显式常量。
+ * 值来源：RM0090 参考手册 + stm32f4xx.h CMSIS 定义。
+ * LISR(Stream0~3) 与 HISR(Stream4~7) 的位布局相同：
+ *   TCIF:  bits {5, 11, 21, 27}
+ *   HTIF:  bits {6, 12, 22, 28}
+ *   TEIF:  bits {3, 9,  19, 25}
+ *   DMEIF: bits {2, 8,  18, 24}
+ *   FEIF:  bits {0, 6?} — 实际使用中通常只需 TCIF 轮询
+ */
+#define F407_DMA_TCIF0   (1UL << 5U)
+#define F407_DMA_TCIF1   (1UL << 11U)
+#define F407_DMA_TCIF2   (1UL << 21U)
+#define F407_DMA_TCIF3   (1UL << 27U)
+#define F407_DMA_TCIF4   (1UL << 5U)
+#define F407_DMA_TCIF5   (1UL << 11U)
+#define F407_DMA_TCIF6   (1UL << 21U)
+#define F407_DMA_TCIF7   (1UL << 27U)
+
+#define F407_DMA_HTIF0   (1UL << 6U)
+#define F407_DMA_HTIF1   (1UL << 12U)
+#define F407_DMA_HTIF2   (1UL << 22U)
+#define F407_DMA_HTIF3   (1UL << 28U)
+#define F407_DMA_HTIF4   (1UL << 6U)
+#define F407_DMA_HTIF5   (1UL << 12U)
+#define F407_DMA_HTIF6   (1UL << 22U)
+#define F407_DMA_HTIF7   (1UL << 28U)
+
+#define F407_DMA_TEIF0   (1UL << 3U)
+#define F407_DMA_TEIF1   (1UL << 9U)
+#define F407_DMA_TEIF2   (1UL << 19U)
+#define F407_DMA_TEIF3   (1UL << 25U)
+#define F407_DMA_TEIF4   (1UL << 3U)
+#define F407_DMA_TEIF5   (1UL << 9U)
+#define F407_DMA_TEIF6   (1UL << 19U)
+#define F407_DMA_TEIF7   (1UL << 25U)
+
+/* 根据 Stream 编号获取标志位 */
+static inline uint32_t F407_DMA_GetTCIF(uint8_t stream)
+{
+    switch (stream) {
+    case 0: return F407_DMA_TCIF0;
+    case 1: return F407_DMA_TCIF1;
+    case 2: return F407_DMA_TCIF2;
+    case 3: return F407_DMA_TCIF3;
+    case 4: return F407_DMA_TCIF4;
+    case 5: return F407_DMA_TCIF5;
+    case 6: return F407_DMA_TCIF6;
+    case 7: return F407_DMA_TCIF7;
+    default: return 0U;
+    }
+}
+
+static inline uint32_t F407_DMA_GetClearMask(uint8_t stream)
+{
+    switch (stream) {
+    case 0: return F407_DMA_TCIF0 | F407_DMA_HTIF0 | F407_DMA_TEIF0;
+    case 1: return F407_DMA_TCIF1 | F407_DMA_HTIF1 | F407_DMA_TEIF1;
+    case 2: return F407_DMA_TCIF2 | F407_DMA_HTIF2 | F407_DMA_TEIF2;
+    case 3: return F407_DMA_TCIF3 | F407_DMA_HTIF3 | F407_DMA_TEIF3;
+    case 4: return F407_DMA_TCIF4 | F407_DMA_HTIF4 | F407_DMA_TEIF4;
+    case 5: return F407_DMA_TCIF5 | F407_DMA_HTIF5 | F407_DMA_TEIF5;
+    case 6: return F407_DMA_TCIF6 | F407_DMA_HTIF6 | F407_DMA_TEIF6;
+    case 7: return F407_DMA_TCIF7 | F407_DMA_HTIF7 | F407_DMA_TEIF7;
+    default: return 0U;
+    }
+}
 
 /* ====== 公开函数 ====== */
 
