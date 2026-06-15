@@ -1,0 +1,54 @@
+# =========================
+# OmniLayer Git Ignore Rules
+# =========================
+
+# CMake / Ninja build outputs
+/build/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/build.ninja
+**/.ninja_deps
+**/.ninja_log
+**/.cmake/
+
+# Generated firmware and map outputs
+*.elf
+*.hex
+*.bin
+*.map
+*.axf
+*.lnp
+*.htm
+
+# Compiler intermediate files
+*.o
+*.obj
+*.d
+*.dep
+*.crf
+*.lst
+
+# Keil uVision generated folders
+MDK_ARM/**/OBJ/
+MDK_ARM/**/Listings/
+MDK_ARM/**/DebugConfig/
+
+# Keil user/machine local files
+*.uvoptx
+*.uvguix.*
+
+# VS Code runtime logs (keep project config files)
+.vscode/*.log
+.vscode/*.log.lock
+MDK_ARM/**/.vscode/*.log
+MDK_ARM/**/.vscode/*.log.lock
+MDK_ARM/**/.vscode/keil-assistant.log
+
+# Large third-party source trees that should stay local only
+Middlewares/
+Drivers/Drivers_M0G3507/source/
+
+# OS temp files
+.DS_Store
+Thumbs.db

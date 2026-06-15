@@ -1,0 +1,144 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "_Cfg Debug",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--preset",
+				"Debug"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [],
+			"hide": true
+		},
+		{
+			"label": "Build",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"--preset",
+				"Debug"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"dependsOn": [
+				"_Cfg Debug"
+			],
+			"dependsOrder": "sequence"
+		},
+		{
+			"label": "Flash",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"--preset",
+				"Debug",
+				"--target",
+				"flash"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [],
+			"dependsOn": [
+				"Build"
+			],
+			"dependsOrder": "sequence"
+		},
+		{
+			"label": "KEY1 Build MCU",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cmake --preset ${input:mcuBuildPreset} && cmake --build --preset ${input:mcuBuildPreset}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": [
+				"$gcc"
+			]
+		},
+		{
+			"label": "KEY2 Flash MCU",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"cmake --preset ${input:mcuFlashPreset} && cmake --build --preset ${input:mcuFlashPreset} --target flash"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "KEY3 Set MCU",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\.vscode\\set-default-mcu-target.ps1",
+				"-Target",
+				"${input:mcuMacroTarget}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": []
+		}
+	],
+	"inputs": [
+		{
+			"id": "mcuBuildPreset",
+			"type": "pickString",
+			"description": "选择要编译的 MCU 目标",
+			"options": [
+				"Debug-F103",
+				"Debug-F407",
+				"Debug-G3507"
+			],
+			"default": "Debug-F407"
+		},
+		{
+			"id": "mcuFlashPreset",
+			"type": "pickString",
+			"description": "选择要下载的 MCU 目标",
+			"options": [
+				"Debug-F103",
+				"Debug-F407",
+				"Debug-G3507"
+			],
+			"default": "Debug-F407"
+		},
+		{
+			"id": "mcuMacroTarget",
+			"type": "pickString",
+			"description": "选择并写入 ENROLL_MCU_TARGET 默认目标",
+			"options": [
+				"ENROLL_MCU_F103",
+				"ENROLL_MCU_F407",
+				"ENROLL_MCU_G3507"
+			],
+			"default": "ENROLL_MCU_F407"
+		}
+	]
+}
