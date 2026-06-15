@@ -4,6 +4,7 @@
 #include "usart.h"
 #include "My_Usart/My_Usart.h"
 #include "Control/Control.h"
+#include "Dshot.h"
 
 /* 程序运行的时间戳（s） */
 uint32_t Timer_Bsp_t = 0;
@@ -50,7 +51,7 @@ void Control_Task2_Callback(API_TIM_Id_t id)
 	printf_tick++;
 	time_t++;
 
-	if (printf_tick >= 50U)
+	if (printf_tick >= 100U)
 	{
 		printf_tick = 0U;
 		print_task_flag = 1U;

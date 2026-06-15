@@ -23,6 +23,7 @@
 #include "tim.h"
 #include "exti.h"
 #include "MPU6050_Int.h"
+#include "NRF24L01.h"
 
 #include <stddef.h>
 

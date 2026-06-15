@@ -43,10 +43,12 @@
 /* --- 总线选择 --- */
 #define OLED_I2C_BUS       API_I2C2
 #define OLED_SPI_BUS       API_SPI1
+
 #define MPU6050_I2C_BUS    API_I2C1
 #define QMC5883P_I2C_BUS   API_I2C1
 #define BMP280_I2C_BUS     API_I2C1
-#define NRF24L01_SPI_BUS   API_SPI2
+
+#define NRF24L01_SPI_BUS   API_SPI1
 
 /* --- 速率档位 --- */
 #define OLED_I2C_SPEED      API_I2C_SPEED_400K

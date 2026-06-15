@@ -159,3 +159,20 @@ void Enroll_MPU6050_Register(void)
 	/* API_EXTI_AddIrqHandler(s_mpuExtiTable[0].id, Other_EXTI_Callback, userPtr); */
 	API_EXTI_Init(s_mpuExtiTable[0].id, API_EXTI_TRIGGER_RISING, IRQ_PRIO_MPU6050, IRQ_SUB_PRIO_MPU6050);
 }
+
+/****************************** NRF24L01 控制脚注册层 ************************/
+/* NRF24L01 CE 控制脚配置表：把 HW_NRF24L01_CTRL_MAP 展开成 NRF24L01_CtrlConfig_t。 */
+#define ENROLL_NRF24L01_CTRL_ITEM(cePort, cePin) \
+	{ cePort, cePin },
+
+static const NRF24L01_CtrlConfig_t s_nrfCtrlTable[] =
+{
+	HW_NRF24L01_CTRL_MAP(ENROLL_NRF24L01_CTRL_ITEM)
+};
+#undef ENROLL_NRF24L01_CTRL_ITEM
+
+/* NRF24L01 CE 脚注册：登记板级 CE 控制引脚（PC5）。 */
+void Enroll_NRF24L01_Register(void)
+{
+	NRF24L01_RegisterCtrl(s_nrfCtrlTable, HW_NRF24L01_CTRL_COUNT);
+}

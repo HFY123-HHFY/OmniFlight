@@ -85,7 +85,9 @@ static void API_USART_ConfigRxPin(void *port, uint16_t pin)
 /* USART1/2/3 对应的复用功能号。 */
 static uint8_t API_USART_GetAfNum(API_USART_Id_t id)
 {
-	return (id == API_USART3) ? 8U : 7U;
+	/* STM32F407 所有 USART1/2/3 均使用 AF7 */
+	(void)id;
+	return 7U;
 }
 
 /* 配置 F407 的 TX/RX 引脚为复用模式。 */

@@ -37,9 +37,9 @@ LED1 绿 LED2 红 LED3 蓝
 	X(API_TIM1, API_TIM_CORE_TIM3) \
 	X(API_TIM2, API_TIM_CORE_TIM2)
 	
-/* PWM 板级映射：DShot 已接管 TIM1 四路电机输出，API PWM 层不再管理 TIM1。
-   保留空映射以维持 Enroll.c / API pwm.c 编译兼容。 */
-#define HW_PWM_MAP(X)
+/* PWM 板级映射 */
+#define HW_PWM_MAP(X)\
+	X(API_PWM_TIM3, API_PWM_CH4, API_PWM_CORE_TIM3, API_PWM_CORE_CH4, GPIOB, GPIO_Pin_1)
 
 /* 软件 I2C1 引脚定义：SCL=PB8，SDA=PB9（MPU/QMC/BMP）*/
 #define HW_I2C1_SCL_PORT GPIOB
@@ -96,8 +96,8 @@ LED1 绿 LED2 红 LED3 蓝
 #define HW_USART_COUNT  2U
 /* 当前板子上注册了 2 路 TIM中断服务函数 */
 #define HW_TIM_COUNT  2U
-/* 当前板子上注册了 0 路 PWM 通道（改由 BSP/Dshot 直接管理 TIM1） */
-#define HW_PWM_COUNT  0U
+/* 当前板子上注册了 1 路 PWM 通道 */
+#define HW_PWM_COUNT  1U
 /* 当前板子上注册了 4 路 ADC 通道 */
 #define HW_ADC_COUNT  4U
 /* 当前板子上注册了 1 路软件 I2C */

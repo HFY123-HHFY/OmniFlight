@@ -80,6 +80,9 @@ void Enroll_LED_Register(void);
 /* MPU6050 外部中断与回调。 */
 void Enroll_MPU6050_Register(void);
 
+/* NRF24L01 注册：登记 CE 控制引脚（PC5）。*/
+void Enroll_NRF24L01_Register(void);
+
 #ifdef __cplusplus
 }
 #endif

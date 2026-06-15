@@ -12,6 +12,7 @@
 /*API层 MCU片内外设*/
 #include "usart.h"
 #include "tim.h"
+#include "pwm.h"
 
 /*app应用层*/
 #include "My_Usart/My_Usart.h"
@@ -29,6 +30,7 @@
 #include "BMP280.h"
 #include "Dshot.h" /* DShot协议 初始化 */
 #include "NRF24L01.h"
+#include "Buzzer.h"
 
 int main(void)
 {
@@ -37,10 +39,11 @@ int main(void)
 /* 注册层：注册相关资源，登记资源映射 */
 	Enroll_LED_Register();					/* LED 资源注册 */
 	Enroll_USART_Register();				/* USART 资源注册 */
-	/* Enroll_PWM_Register() 不再需要：电机输出由 BSP/Dshot 管理 */
+	Enroll_PWM_Register();					/* PWM 资源注册（Buzzer: TIM3 CH4） */
 	Enroll_TIM_Register();					/* TIM 资源注册 */
 	Enroll_I2C_Register();					/* I2C 资源注册 */
 	Enroll_SPI_Register();					/* SPI 资源注册 */
+	Enroll_NRF24L01_Register();				/* NRF24L01 CE 引脚注册 */
 
 	/* 注册后绑定中断回调*/
 	Enroll_USART_RegisterIrqHandler(Control_Task_USART_Callback); 		/* USART 中断回调：注册时自动使能异步 TX */
@@ -53,8 +56,8 @@ int main(void)
 
 	API_TIM_Init(API_TIM1, 1U); /* TIM1: PID 节拍，每 1ms */
 	API_TIM_Init(API_TIM2, 1U); /* TIM2: printf/时间戳  每 1ms */
+	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U);
 	
-
 /* 通信协议初始化 */
 	API_I2C_Init();						/* 软件 I2C 初始化 */
 	API_SPI_Init();						/* 软件 SPI 初始化 */
@@ -71,25 +74,33 @@ int main(void)
 	BMP280Init();	/* 初始化BMP280 */
 	DShot_Init();	/* 初始化DShot协议 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
+	Buzzer_Init();	/* 蜂鸣器初始化 */
 
 	while (1)
 	{
-	/* MPU6050 DMP */
+/* MPU6050 DMP */
 		mpu_angle();
+		Angle_XY = QMC_Data();
+		alt = BMP_Data();
 
-	 /* 串级PID控制 - 2ms 姿态环*/
+/* 串级PID控制 - 2ms 姿态环*/
 		if (pid_task_flag != 0U)   // 500Hz 姿态环
 		{
 			pid_task_flag = 0U;
 			// PID_Pitch_Roll_Combined(Pitch, Roll);
 		}
+
+/* 和遥控器通信 */
+		NRF24L01_Data();
+
 	/* 串口数据打印 */
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
+			usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
 			// usart_printf(USART1, "Timer_Bsp_t: %lu\r\n", Timer_Bsp_t);
-			usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
-			// usart_printf(USART2, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
+			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
+			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}
 	}
 }
