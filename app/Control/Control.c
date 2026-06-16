@@ -1,7 +1,5 @@
 #include "Control.h"
-
-/* PID 任务节拍标志：由 2ms 定时节拍置位。 */
-uint8_t pid_task_flag = 0U;
+#include "Control_Task/Control_Task.h"  /* pid_task_flag / nrf_task_flag 等标志位 */
 
 /* 目标层：姿态 */
 float Target_Pitch = 0.0f;
@@ -24,8 +22,6 @@ static uint8_t s_gyro_bias_ready = 0U;
 /* 控制回路周期：500Hz。 */
 #define CONTROL_DT_S (0.002f)
 
-/* 速度环 */
-PID_EncoderSpeed_t speed_loop;
 /* 外环 PID。 */
 PID_TypeDef pid_pitch;
 PID_TypeDef pid_roll;
@@ -74,18 +70,6 @@ static uint8_t GyroBiasAutoCalibStep(void)
 	}
 
 	return 0U;
-}
-
-/* Motor_Test() 由 BSP/Motor 模块提供实现。 */
-
-/* 速度环初始化。 */
-void PID_Speed_Init(void)
-{
-	PID_EncoderSpeed_Init(&speed_loop);
-
-	/* 速度环周期与 Encoder_flag 保持一致（20ms） */
-	PID_SetSampleTime(&speed_loop.left,  0.02f);
-	PID_SetSampleTime(&speed_loop.right, 0.02f);
 }
 
 /* PID 参数初始化。 */
@@ -146,12 +130,10 @@ void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll)
 	float gyro_pitch_dps = 0.0f;
 	float gyro_roll_dps = 0.0f;
 
-	/* 只有节拍到来才执行一次 PID。 */
-	if (pid_task_flag != 1U)
-	{
-		return;
-	}
-	pid_task_flag = 0U;
+	/*
+	 * 注意：pid_task_flag 已由调用方（main loop）在进入前检查并清零，
+	 * 此处不再重复检查，直接执行 PID 运算。
+	 */
 
 	/* 启动阶段先做零偏校准，避免积分带偏。 */
 	if (GyroBiasAutoCalibStep() == 0U)
@@ -186,18 +168,6 @@ void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll)
 	pid_rate_pitch.output = pitch_rate_out;
 	pid_rate_roll.output = roll_rate_out;
 
-	/* 加载输出到电机：预留统一入口，后续混控。 */
+	/* 加载输出到电机-混控 */
 	Motor_Test();
-}
-
-/* 速度环控制函数：由 main.c 在 Encoder_flag 节拍（20ms）调用一次。 */
-void PID_Speed_Control(float actual_left, float actual_right)
-{
-	float out_left = 0.0f;
-	float out_right = 0.0f;
-
-	PID_EncoderSpeed_Control(&speed_loop, actual_left, actual_right, &out_left, &out_right);
-
-	/* 加载输出到电机 */
-	TB6612_SetSpeed((int16_t)out_left, (int16_t)out_right);
 }

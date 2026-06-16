@@ -7,21 +7,37 @@
 #include "Dshot.h"
 #include "Motor.h"
 
-/* 程序运行的时间戳（s） */
+/* =========================================================================
+ * 任务标志位
+ *
+ * 全部由定时器 ISR 置位（1），主循环消费后清零（0）。
+ * 统一模式：ISR 管时间 → 置标志 → 主循环管执行
+ * ========================================================================= */
+
+/* 程序运行的时间戳（s），TIM2 每 1s 递增 */
 uint32_t Timer_Bsp_t = 0;
 
-/* printf节拍 */
-volatile uint8_t print_task_flag = 0;
+/* TIM1 分发：PID 控制节拍 (500Hz) */
+volatile uint8_t pid_task_flag = 0U;
 
-/*
- * 定时器回调函数：
- * 由 API_TIM 的通用中断分发层在更新中断到来后调用。
- * API_TIM1: 1ms -> PID 2ms
- */
+/* TIM2 分发：慢速外设任务 */
+volatile uint8_t nrf_task_flag   = 0U;   /* 100Hz NRF24L01 遥控通信 */
+volatile uint8_t qmc_task_flag   = 0U;   /* 50Hz  QMC5883P 磁力计   */
+volatile uint8_t bmp_task_flag   = 0U;   /* 20Hz  BMP280 气压计     */
+volatile uint8_t print_task_flag = 0U;   /* 10Hz  串口打印          */
+
+/* =========================================================================
+ * Control_Task1_Callback — TIM1 (TIM3) 1ms ISR
+ *
+ * 职责：飞控心脏节拍
+ *   - PID 控制 + 电机输出：500Hz（每 2ms）
+ *
+ * 注意：此 ISR 只做计数 + 置标志，不执行 PID 运算。
+ *       PID 运算在 main loop 中根据标志位触发。
+ * ========================================================================= */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
 	static uint8_t pid_2ms_tick = 0U;
-	static uint8_t DShot_tick = 0U;
 
 	if (id != API_TIM1)
 	{
@@ -29,41 +45,74 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 	}
 
 	pid_2ms_tick++;
-	DShot_tick++;
 
 	if (pid_2ms_tick >= 2U)
 	{
 		pid_2ms_tick = 0U;
 		pid_task_flag = 1U;
 	}
-	if (DShot_tick >= 10)
-	{
-		DShot_tick = 0U;
-	}
 }
 
-/*
- * API_TIM2: 1ms -> Key + printf + time
- */
+/* =========================================================================
+ * Control_Task2_Callback — TIM2 1ms ISR
+ *
+ * 职责：所有非飞控周期任务的统一调度中心
+ *
+ *   1000ms → Timer_Bsp_t++     (1Hz  时间戳)
+ *    100ms → print_task_flag   (10Hz 串口打印)
+ *     50ms → bmp_task_flag     (20Hz 气压计)
+ *     20ms → qmc_task_flag     (50Hz 磁力计)
+ *     10ms → nrf_task_flag     (100Hz 遥控通信)
+ *
+ * 所有计数器和标志位集中在此，改频率只需改这若干个数字。
+ * ========================================================================= */
 void Control_Task2_Callback(API_TIM_Id_t id)
 {
+	static uint8_t nrf_tick    = 0U;
+	static uint8_t qmc_tick    = 0U;
+	static uint8_t bmp_tick    = 0U;
 	static uint8_t printf_tick = 0U;
-	static uint16_t time_t = 0U;
+	static uint16_t time_t     = 0U;
 
 	if (id != API_TIM2)
 	{
 		return;
 	}
 
-	printf_tick++;
-	time_t++;
+	/* ---- NRF24L01: 100Hz (每 10ms) ---- */
+	nrf_tick++;
+	if (nrf_tick >= 10U)
+	{
+		nrf_tick = 0U;
+		nrf_task_flag = 1U;
+	}
 
+	/* ---- QMC5883P: 50Hz (每 20ms) ---- */
+	qmc_tick++;
+	if (qmc_tick >= 20U)
+	{
+		qmc_tick = 0U;
+		qmc_task_flag = 1U;
+	}
+
+	/* ---- BMP280: 20Hz (每 50ms) ---- */
+	bmp_tick++;
+	if (bmp_tick >= 50U)
+	{
+		bmp_tick = 0U;
+		bmp_task_flag = 1U;
+	}
+
+	/* ---- printf: 10Hz (每 100ms) ---- */
+	printf_tick++;
 	if (printf_tick >= 100U)
 	{
 		printf_tick = 0U;
 		print_task_flag = 1U;
 	}
 
+	/* ---- 时间戳: 1Hz (每 1000ms) ---- */
+	time_t++;
 	if (time_t >= 1000U)
 	{
 		time_t = 0U;
@@ -71,12 +120,13 @@ void Control_Task2_Callback(API_TIM_Id_t id)
 	}
 }
 
-/*
- * USART 中断回调。
+/* =========================================================================
+ * Control_Task_USART_Callback — USART 中断回调
+ *
  * 由 USART ISR 触发，调度 TX 队列排空（printf 异步发送的核心）。
  * 传 NULL 跳过 RX 接收处理，仅做 TX 排空。
  * 此回调必须注册（Enroll_USART_RegisterIrqHandler），否则 TXE 中断会无限循环。
- */
+ * ========================================================================= */
 void Control_Task_USART_Callback(API_USART_Id_t id)
 {
 	usart_irq_dispatch_by_id(id, 0, 0);

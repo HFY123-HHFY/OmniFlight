@@ -11,18 +11,18 @@
  * 飞控优先级分配：
  *  ┌──────────────────────────────────────────┐
  *  │  0  SysTick / 系统时钟                    │
- *  │  1  API_TIM 控制节拍 (1ms)               │ ← PID/混控的心脏，最高实时
- *  │  2  MPU6050 EXTI                          │ ← 姿态数据，串级外环输入
- *  │  3  API_TIM 杂务节拍 (printf/时间戳)      │ ← 日志输出，可被抢占
+ *  │  1  MPU6050 EXTI                          │ ← 姿态数据就绪，DMP FIFO 防溢出
+ *  │  2  TIM3 控制节拍 (1ms)                   │ ← PID/混控 500Hz 心跳
+ *  │  3  TIM2 慢任务节拍 (1ms)                 │ ← NRF/QMC/BMP/printf 调度中心
  *  │  4  USART (×2)                            │ ← 通信丢包可重传
  *  │  5+ 缺省                                  │
  *  └──────────────────────────────────────────┘
  *
  * 注：
- * - PID 计算在 main loop 中执行，不在 ISR 里，不占用 NVIC 优先级
- * - NRF24L01 为 SPI 轮询模式，不使用中断，无需优先级
- * - DShot 使用 DMA 轮询（阻塞发送），无 DMA 中断，无需优先级
- * - 编码器不使用（飞控无速度环编码器），相关优先级已移除
+ * - 所有 ISR 只做计数+置标志，不执行耗时运算
+ * - PID 计算在 main loop 中执行，不在 ISR 里
+ * - NRF24L01 为 SPI 轮询模式，不使用中断
+ * - DShot 使用 DMA 轮询（阻塞发送），无 DMA 中断
  *
  * NVIC 差异：
  * - STM32F407: Cortex-M4, 4bit NVIC, 0~15
@@ -35,8 +35,9 @@
  * ================================================================ */
 #if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
 
-#define IRQ_PRIO_TIM_CTRL    0U   /* 最高：1ms 控制节拍       */
-#define IRQ_PRIO_MPU6050     1U   /* 高：姿态传感器            */
+#define IRQ_PRIO_MPU6050     0U   /* 最高：姿态传感器            */
+#define IRQ_PRIO_TIM_CTRL    1U   /* 高：1ms 控制节拍            */
+#define IRQ_PRIO_TIM_AUX     1U   /* 合并到 TIM_CTRL（2bit 只有 4 级） */
 #define IRQ_PRIO_USART       2U   /* 中：串口通信              */
 #define IRQ_PRIO_DEFAULT     3U   /* 低：未指定中断            */
 
@@ -47,11 +48,11 @@
  * ================================================================ */
 #else
 
-#define IRQ_PRIO_TIM_CTRL    1U   /* 最高实时：1ms 控制节拍    */
-#define IRQ_PRIO_MPU6050     2U   /* 高实时：姿态传感器         */
-#define IRQ_PRIO_TIM_AUX     3U   /* 中实时：printf/时间戳      */
-#define IRQ_PRIO_USART       4U   /* 低实时：串口通信           */
-#define IRQ_PRIO_DEFAULT     5U   /* 最低：缺省中断             */
+#define IRQ_PRIO_MPU6050     1U   /* 最高实时：姿态传感器       */
+#define IRQ_PRIO_TIM_CTRL    2U   /* 高实时：1ms 控制节拍        */
+#define IRQ_PRIO_TIM_AUX     3U   /* 中实时：慢任务调度          */
+#define IRQ_PRIO_USART       4U   /* 低实时：串口通信             */
+#define IRQ_PRIO_DEFAULT     5U   /* 最低：缺省中断               */
 
 #define IRQ_SUB_PRIO_MPU6050 0U
 

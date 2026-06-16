@@ -73,38 +73,62 @@ int main(void)
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 	QMC_Init();		/* 初始化QMC5883P */
 	BMP280Init();	/* 初始化BMP280 */
-	DShot_Init();	/* 初始化DShot协议 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
+	DShot_Init();	/* 初始化DShot协议 */
 	Buzzer_Init();	/* 蜂鸣器初始化 */
+
+/* ── 调试开关：起飞前设 0，关闭所有 printf ── */
+#define DEBUG_PRINT_ENABLE  1U
 
 	while (1)
 	{
-/* MPU6050 DMP */
-		// mpu_angle();
-		// Angle_XY = QMC_Data();
-		// alt = BMP_Data();
+	/* ── Phase 1: 姿态与控制 (500Hz) ───────────────── */
+	/*     陀螺仪 + 串级 PID + 混控 + DShot 电机输出    */
 
-/* 串级PID控制 - 2ms 姿态环*/
-		if (pid_task_flag != 0U)   // 500Hz 姿态环
+		mpu_angle();
+
+		if (pid_task_flag != 0U)
 		{
 			pid_task_flag = 0U;
-			// PID_Pitch_Roll_Combined(Pitch, Roll);
+			PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
 		}
 
-/* 和遥控器通信 */
-		NRF24L01_Data();
+	/* ── Phase 2: 遥控链路 (100Hz) ─────────────────── */
+	/*     NRF24L01 收发：遥控输入 + 遥测回传           */
 
-		DShot_Write(speed_temp,speed_temp,speed_temp,speed_temp);
+		if (nrf_task_flag != 0U)
+		{
+			nrf_task_flag = 0U;
+			NRF24L01_Data();
+		}
 
-	/* 串口数据打印 */
+	/* ── Phase 3: 导航传感器 ──────────────────────── */
+	/*     QMC5883P (50Hz) → Yaw 漂移融合              */
+	/*     BMP280   (20Hz) → 定高环 PID 输入            */
+
+		if (qmc_task_flag != 0U)
+		{
+			qmc_task_flag = 0U;
+			Angle_XY = QMC_Data();
+		}
+
+		if (bmp_task_flag != 0U)
+		{
+			bmp_task_flag = 0U;
+			alt = BMP_Data();
+		}
+
+	/* ── Phase 4: 调试输出 (10Hz) ──────────────────── */
+	/*     起飞前将文件头 DEBUG_PRINT_ENABLE 设为 0      */
+
+	#if (DEBUG_PRINT_ENABLE == 1U)
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
-			// usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
-			// usart_printf(USART1, "Timer_Bsp_t: %lu\r\n", Timer_Bsp_t);
+			usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
 			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}
-
+	#endif
 	}
 }
