@@ -37,18 +37,31 @@ extern PID_TypeDef pid_rate_yaw;
 
 /*
  * 控制初始化：
- * 1) 初始化外环/内环 PID
- * 2) 初始化传感器低通滤波器
- * 3) 设置串级控制对象
+ * 1) 初始化外环/内环 PID（含限幅）
+ * 2) 初始化串级控制对象
+ * 3) 初始化陀螺低通滤波器
  */
 void PID_Contorl_Init(void);
 
-/* 设置陀螺零偏（单位：原始 LSB）。 */
+/*
+ * 陀螺零偏校准（上电后调用一次，飞行器必须静止）。
+ * samples: 采样点数（建议 1000，约 5s）
+ * 返回 1 成功，0 超时失败。
+ *
+ * 校准期间 LED3 高电平，完成/失败后恢复低电平。
+ */
+uint8_t GyroBias_Calibrate(uint16_t samples);
+
+/* 查询校准是否完成。 */
+uint8_t GyroBias_IsReady(void);
+
+/* 手动设置陀螺零偏（单位：原始 LSB）。 */
 void Set_Gyro_Bias(float bias_x, float bias_y, float bias_z);
 
 /*
  * Pitch/Roll 串级 PID 控制。
-*/
+ * 校准已独立完成，此函数不再包含校准逻辑。
+ */
 void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll);
 
 #ifdef __cplusplus

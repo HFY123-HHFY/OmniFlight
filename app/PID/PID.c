@@ -64,6 +64,9 @@ void PID_Init(PID_TypeDef* pid)
 	pid->d_lpf_alpha = 0.35f; /* 微分低通滤波系数 */
 	pid->d_filter_state = 0.0f; /* 微分低通滤波内部状态 */
 
+	pid->Integral_max = 1000.0f; /* 默认积分限幅，调用方可用 PID_Init_WithLimit 覆盖 */
+	pid->Out_max = 2047.0f;      /* 默认输出限幅 */
+
 	pid->enable = PID_ENABLE;  /* 设置PID使能开关 */
 	pid->anti_windup = PID_ENABLE; /* 设置抗积分饱和开关 */
 	pid->mode = (uint8_t)PID_MODE_POSITION; /* 设置PID模式 - 位置式 PID */

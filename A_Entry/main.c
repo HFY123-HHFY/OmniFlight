@@ -1,5 +1,6 @@
 /*
-* OmniFlight - 四轴飞控
+* OmniFlight - 四轴飞控 
+* 流程：初始化校准陀螺仪-蓝灯亮-校准完毕蓝灯灭，全部外设初始化完-蜂鸣器叫红灯亮一次，锁定油门-红灯亮
 */
 
 /* Enroll 注册层，负责把板级资源注册到 BSP */
@@ -58,11 +59,11 @@ int main(void)
 	API_TIM_Init(API_TIM1, 1U); /* TIM1: PID 节拍，每 1ms */
 	API_TIM_Init(API_TIM2, 1U); /* TIM2: printf/时间戳  每 1ms */
 	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U);
-	
+
 /* 通信协议初始化 */
 	API_I2C_Init();						/* 软件 I2C 初始化 */
 	API_SPI_Init();						/* 软件 SPI 初始化 */
-	App_I2C_ScanOnce();					/* 开机执行一次 I2C 扫描 */
+	// App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
 	// App_SPI_TestOnce();				/* 开机执行一次 SPI 测试 */
 
 /*BSP硬件抽象层初始化*/
@@ -71,11 +72,26 @@ int main(void)
 	uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
 	usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
+
+	/* 陀螺零偏校准：飞行器必须保持静止！LED3 亮=校准中，灭=完成 */
+	GyroBias_Calibrate(1000U);
+
 	QMC_Init();		/* 初始化QMC5883P */
 	BMP280Init();	/* 初始化BMP280 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
+	PID_Contorl_Init();	/* 初始化PID控制 */
 	DShot_Init();	/* 初始化DShot协议 */
-	Buzzer_Init();	/* 蜂鸣器初始化 */
+	Buzzer_Init();	/* 所有外设初始化完成-蜂鸣器初始化 */
+
+	/*
+	 * 串级PID参数（基于 dt=0.002s，500Hz）
+	 * 调参顺序：先 KP → 再 KD → 最后 KI
+	 */
+	Set_PID(&pid_pitch,      2.0f, 15.0f, 0.0f);   // 外环 Pitch: KP=2.0, KI=15.0
+	Set_PID(&pid_rate_pitch, 1.5f,  5.0f, 0.008f); // 内环 Pitch: KP=1.5, KI=5.0, KD=0.008
+
+	Set_PID(&pid_roll,       2.0f, 15.0f, 0.0f);   // 外环 Roll
+	Set_PID(&pid_rate_roll,  1.5f,  5.0f, 0.008f); // 内环 Roll
 
 /* ── 调试开关：起飞前设 0，关闭所有 printf ── */
 #define DEBUG_PRINT_ENABLE  1U
@@ -125,7 +141,7 @@ int main(void)
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
-			usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
+			// usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
 			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}

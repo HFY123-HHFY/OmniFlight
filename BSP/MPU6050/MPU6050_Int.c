@@ -65,7 +65,7 @@ void mpu_angle(void)
 	{
 		mpu_flag = 0U;
 		mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
-		// MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
+		MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
 		/* MPU_Get_Accelerometer(&aacx, &aacy, &aacz); */
 	}
 }

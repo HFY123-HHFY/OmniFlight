@@ -166,7 +166,7 @@ void Motor_Test(void)
         Motor_Output[3] = m4;
 
         DShot_Write(m1, m2, m3, m4);
-        LED_Control(LED1, LED_LOW);
+        LED_Control(LED2, LED_LOW);
     }
     else if (Key == 2)
     {
@@ -194,6 +194,6 @@ void Motor_Test(void)
         }
 
         DShot_Write(m1, m2, m3, m4);
-        LED_Control(LED1, LED_HIGH);
+        LED_Control(LED2, LED_HIGH);
     }
 }

@@ -14,8 +14,8 @@ void Buzzer_Init(void)
 	uint16_t arr = (1000000U / 2700U) - 1U;
 
 	API_PWM_Setcom(API_PWM_TIM3, API_PWM_CH4, arr / 2U);  /* 50% duty */
-	LED_Control(LED2, LED_HIGH);
+	LED_Control(LED1, LED_HIGH);
 	Delay_ms(300U);
 	API_PWM_Setcom(API_PWM_TIM3, API_PWM_CH4, 0U);        /* 静音 */
-	LED_Control(LED2, LED_LOW);
+	LED_Control(LED1, LED_LOW);
 }
