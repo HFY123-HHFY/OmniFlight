@@ -1,5 +1,5 @@
 #include "API_I2C.h"
-#include "soft_i2c_hal.h"
+#include "i2c_hal.h"
 
 #include "Delay.h"
 #include "My_Usart/My_Usart.h"
@@ -13,6 +13,9 @@ static const API_I2C_Config_t *s_i2cTable;
 static uint8_t s_i2cCount;
 static volatile API_I2C_BusId_t s_activeBusId = API_I2C1;
 static volatile API_I2C_SpeedTypeDef s_i2cSpeed = API_I2C_SPEED_100K;
+
+/* 全局操作表指针 — 由 Enroll 层设置。默认指向软件 I2C。 */
+I2C_HAL_Ops *g_i2c_hal_ops = 0;
 
 /* ===================== 内部辅助 ===================== */
 
@@ -39,6 +42,12 @@ static const API_I2C_Config_t *API_I2C_GetConfigById(API_I2C_BusId_t busId)
 	return 0;
 }
 
+/*
+ * 安全调用 ops 宏：ops 未初始化时直接返回避免崩溃。
+ */
+#define I2C_OPS_CALL_VOID(fn, ...)          do { if (g_i2c_hal_ops && g_i2c_hal_ops->fn) g_i2c_hal_ops->fn(__VA_ARGS__); } while(0)
+#define I2C_OPS_CALL_RET(fn, def, ...)      ((g_i2c_hal_ops && g_i2c_hal_ops->fn) ? g_i2c_hal_ops->fn(__VA_ARGS__) : (def))
+
 /* ===================== 公共 API ===================== */
 
 /*
@@ -52,7 +61,8 @@ void API_I2C_Register(const API_I2C_Config_t *configTable, uint8_t count)
 	if ((configTable != 0) && (count > 0U))
 	{
 		s_activeBusId = (API_I2C_BusId_t)configTable[0].id;
-		soft_i2c_hal_init(configTable[0].sclPort, configTable[0].sclPin, configTable[0].sclIomux,
+		I2C_OPS_CALL_VOID(Init,
+		                  configTable[0].sclPort, configTable[0].sclPin, configTable[0].sclIomux,
 		                  configTable[0].sdaPort, configTable[0].sdaPin, configTable[0].sdaIomux);
 	}
 	else
@@ -62,7 +72,7 @@ void API_I2C_Register(const API_I2C_Config_t *configTable, uint8_t count)
 }
 
 /*
- * 选择当前操作的软件 I2C 总线。
+ * 选择当前操作的 I2C 总线。
  */
 void API_I2C_SelectBus(API_I2C_BusId_t busId)
 {
@@ -72,60 +82,42 @@ void API_I2C_SelectBus(API_I2C_BusId_t busId)
 	if (cfg != 0)
 	{
 		s_activeBusId = busId;
-		soft_i2c_hal_init(cfg->sclPort, cfg->sclPin, cfg->sclIomux,
+		I2C_OPS_CALL_VOID(SelectBus,
+		                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
 		                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
 	}
 
-	/* 总线切换后恢复默认延时 (其他设备如 MPU6050 需要协议合规的时序) */
-	soft_i2c_hal_delay_on();
+	/* 总线切换后恢复默认延时 */
+	I2C_OPS_CALL_VOID(DelayOn);
 }
 
-/*
- * 关闭 bit-bang 延时 (OLED 等高速设备全速运行)。
- * 注意: 下一次 API_I2C_SelectBus 会自动恢复延时。
- */
 void API_I2C_DelayOff(void)
 {
-	soft_i2c_hal_delay_off();
+	I2C_OPS_CALL_VOID(DelayOff);
 }
 
-/*
- * 恢复 bit-bang 延时。
- */
 void API_I2C_DelayOn(void)
 {
-	soft_i2c_hal_delay_on();
+	I2C_OPS_CALL_VOID(DelayOn);
 }
 
 /*
- * 设置软件 I2C 速率档位。
+ * 设置 I2C 速率档位。
  */
 void API_I2C_SetSpeed(API_I2C_SpeedTypeDef speed)
 {
+	uint32_t speedKhz;
+
 	switch (speed)
 	{
-	case API_I2C_SPEED_400K:
-		s_i2cSpeed = API_I2C_SPEED_400K;
-		soft_i2c_hal_set_speed(400U);
-		break;
-	case API_I2C_SPEED_200K:
-		s_i2cSpeed = API_I2C_SPEED_200K;
-		soft_i2c_hal_set_speed(200U);
-		break;
-	case API_I2C_SPEED_50K:
-		s_i2cSpeed = API_I2C_SPEED_50K;
-		soft_i2c_hal_set_speed(50U);
-		break;
-	default:
-		s_i2cSpeed = API_I2C_SPEED_100K;
-		soft_i2c_hal_set_speed(100U);
-		break;
+	case API_I2C_SPEED_400K: s_i2cSpeed = API_I2C_SPEED_400K; speedKhz = 400U; break;
+	case API_I2C_SPEED_200K: s_i2cSpeed = API_I2C_SPEED_200K; speedKhz = 200U; break;
+	case API_I2C_SPEED_50K:  s_i2cSpeed = API_I2C_SPEED_50K;  speedKhz = 50U;  break;
+	default:                 s_i2cSpeed = API_I2C_SPEED_100K; speedKhz = 100U; break;
 	}
+	I2C_OPS_CALL_VOID(SetSpeed, speedKhz);
 }
 
-/*
- * 获取当前软件 I2C 速率档位。
- */
 API_I2C_SpeedTypeDef API_I2C_GetSpeed(void)
 {
 	return s_i2cSpeed;
@@ -133,11 +125,6 @@ API_I2C_SpeedTypeDef API_I2C_GetSpeed(void)
 
 /* ===================== 初始化 ===================== */
 
-/*
- * 初始化所有已注册的软件 I2C 总线:
- * - 配置 SCL/SDA 为推挽输出 (开漏仿真)
- * - 拉高 SCL/SDA 进入 I2C 空闲态
- */
 void API_I2C_Init(void)
 {
 	uint8_t i;
@@ -148,183 +135,70 @@ void API_I2C_Init(void)
 		return;
 	}
 
-	/* 保存当前活跃总线，防止下面的遍历覆盖掉寄存器指针 */
 	prevBus = s_activeBusId;
 
 	for (i = 0U; i < s_i2cCount; i++)
 	{
 		const API_I2C_Config_t *cfg = &s_i2cTable[i];
-		soft_i2c_hal_init(cfg->sclPort, cfg->sclPin, cfg->sclIomux,
+		I2C_OPS_CALL_VOID(Init,
+		                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
 		                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
 	}
 
-	/* 恢复活跃总线的寄存器指针 */
+	/* 恢复活跃总线 */
 	{
 		const API_I2C_Config_t *cfg = API_I2C_GetConfigById(prevBus);
 		if (cfg != 0)
 		{
-			soft_i2c_hal_init(cfg->sclPort, cfg->sclPin, cfg->sclIomux,
+			I2C_OPS_CALL_VOID(Init,
+			                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
 			                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
 		}
 	}
 
-	/* 释放总线到空闲态 */
-	soft_i2c_hal_set_sda_output();
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_w_sda(1U);
-
-	/* 恢复默认速率延时 */
-	soft_i2c_hal_set_speed(100U);
-	soft_i2c_hal_delay_on();
+	I2C_OPS_CALL_VOID(SetSpeed, 100U);
+	I2C_OPS_CALL_VOID(DelayOn);
 }
 
 /* ===================== 协议层 ===================== */
 
-/*
- * I2C 起始条件:
- * SCL 高电平期间, SDA 从高跳变到低。
- */
 void API_I2C_Start(void)
 {
-	soft_i2c_hal_set_sda_output();
-	soft_i2c_hal_w_sda(1U);
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_delay_us(4U);
-	soft_i2c_hal_w_sda(0U);
-	soft_i2c_hal_delay_us(4U);
-	soft_i2c_hal_w_scl(0U); /* 钳住总线, 准备发送 */
+	I2C_OPS_CALL_VOID(Start);
 }
 
-/*
- * I2C 停止条件:
- * SCL 高电平期间, SDA 从低跳变到高。
- */
 void API_I2C_Stop(void)
 {
-	soft_i2c_hal_set_sda_output();
-	soft_i2c_hal_w_scl(0U);
-	soft_i2c_hal_w_sda(0U);
-	soft_i2c_hal_delay_us(4U);
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_w_sda(1U);
-	soft_i2c_hal_delay_us(4U);
+	I2C_OPS_CALL_VOID(Stop);
 }
 
-/*
- * 等待从机 ACK:
- * 返回 0 = 收到 ACK (SDA 被拉低), 1 = 超时 / NACK。
- */
 uint8_t API_I2C_Wait_Ack(void)
 {
-	uint16_t ErrTime = 0U;
-
-	soft_i2c_hal_set_sda_input();
-	soft_i2c_hal_delay_us(1U);
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_delay_us(1U);
-
-	while (soft_i2c_hal_r_sda())
-	{
-		ErrTime++;
-		if (ErrTime > API_I2C_ACK_TIMEOUT_COUNT)
-		{
-			API_I2C_Stop();
-			return 1U;
-		}
-	}
-
-	soft_i2c_hal_w_scl(0U);
-	return 0U;
+	return I2C_OPS_CALL_RET(WaitAck, 1U);
 }
 
-/*
- * 发送 ACK: 第 9 个时钟拉低 SDA。
- */
 void API_I2C_Ack(void)
 {
-	soft_i2c_hal_w_scl(0U);
-	soft_i2c_hal_set_sda_output();
-	soft_i2c_hal_w_sda(0U);
-	soft_i2c_hal_delay_us(2U);
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_delay_us(2U);
-	soft_i2c_hal_w_scl(0U);
+	I2C_OPS_CALL_VOID(Ack);
 }
 
-/*
- * 发送 NACK: 第 9 个时钟保持 SDA 高。
- */
 void API_I2C_NAck(void)
 {
-	soft_i2c_hal_w_scl(0U);
-	soft_i2c_hal_set_sda_output();
-	soft_i2c_hal_w_sda(1U);
-	soft_i2c_hal_delay_us(2U);
-	soft_i2c_hal_w_scl(1U);
-	soft_i2c_hal_delay_us(2U);
-	soft_i2c_hal_w_scl(0U);
+	I2C_OPS_CALL_VOID(NAck);
 }
 
-/*
- * 发送 1 个字节 (MSB first)。
- */
 void API_I2C_SendByte(uint8_t Byte)
 {
-	uint8_t i;
-
-	soft_i2c_hal_set_sda_output();
-	for (i = 0U; i < 8U; i++)
-	{
-		soft_i2c_hal_w_sda((Byte & 0x80U) >> 7U);
-		Byte <<= 1U;
-		soft_i2c_hal_delay_us(2U);
-		soft_i2c_hal_w_scl(1U);
-		soft_i2c_hal_delay_us(2U);
-		soft_i2c_hal_w_scl(0U);
-		soft_i2c_hal_delay_us(2U);
-	}
+	I2C_OPS_CALL_VOID(SendByte, Byte);
 }
 
-/*
- * 接收 1 个字节:
- * Ack = 1 发送 ACK, Ack = 0 发送 NACK。
- */
 uint8_t API_I2C_ReceiveByte(unsigned char Ack)
 {
-	unsigned char i;
-	unsigned char Byte = 0U;
-
-	soft_i2c_hal_set_sda_input();
-	for (i = 0U; i < 8U; i++)
-	{
-		soft_i2c_hal_w_scl(0U);
-		soft_i2c_hal_delay_us(2U);
-		soft_i2c_hal_w_scl(1U);
-		Byte <<= 1U;
-		if (soft_i2c_hal_r_sda() != 0U)
-		{
-			Byte++;
-		}
-		soft_i2c_hal_delay_us(1U);
-	}
-
-	if (Ack != 0U)
-	{
-		API_I2C_Ack();
-	}
-	else
-	{
-		API_I2C_NAck();
-	}
-
-	return Byte;
+	return I2C_OPS_CALL_RET(ReceiveByte, 0U, Ack);
 }
 
 /* ===================== I2C 扫描 (调试用) ===================== */
 
-/*
- * 扫描指定总线并输出在线设备地址。
- */
 static void App_I2C_ScanBus(API_I2C_BusId_t busId)
 {
 	uint8_t addr;
@@ -367,9 +241,6 @@ static void App_I2C_ScanBus(API_I2C_BusId_t busId)
 	API_I2C_SetSpeed(prevSpeed);
 }
 
-/*
- * 遍历所有已注册总线并执行 I2C 扫描。
- */
 void App_I2C_ScanOnce(void)
 {
 	uint8_t i;

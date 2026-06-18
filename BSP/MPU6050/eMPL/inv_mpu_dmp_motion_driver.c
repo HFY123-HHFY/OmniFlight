@@ -28,8 +28,8 @@
 
 #define delay_ms(ms)    Delay_ms((uint32_t)(ms))
 #define get_ms          mget_ms
-#define log_i           printf
-#define log_e           printf
+#define log_i(...)
+#define log_e(...)
 
 /* These defines are copied from dmpDefaultMPU6050.c in the general MPL
  * releases. These defines may change for each DMP image, so be sure to modify

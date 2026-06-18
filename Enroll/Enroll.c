@@ -1,5 +1,15 @@
 #include "Enroll_Internal.h"
 #include "IrqPriority.h"
+#include "i2c_hal.h"               /* g_i2c_hal_ops */
+#include "BusRate.h"               /* I2C_MODE */
+
+/*
+ * 软件/硬件 I2C 操作表（编译时二选一，宏 I2C_MODE 定义在 BusRate.h）。
+ * g_i2c_hal_ops_soft: API/API_I2C/i2c_soft.c (调用 soft_i2c_hal GPIO 原语)
+ * g_i2c_hal_ops_hw:   Core/STM32F407/f407_hw_i2c.c (操作片上 I2C1 寄存器)
+ */
+extern I2C_HAL_Ops g_i2c_hal_ops_soft;
+extern I2C_HAL_Ops g_i2c_hal_ops_hw;
 
 /*
  * Enroll.c 职责：
@@ -126,10 +136,17 @@ void Enroll_USART_RegisterIrqHandler(API_USART_IrqHandler_t handler)
 }
 
 /***************** I2C/SPI协议资源注册层 *********************/
-/* I2C 注册：仅登记资源表，不在这里做总线初始化。 */
+/* I2C 注册：登记资源表 + 选择软件/硬件 I2C 操作表 */
 void Enroll_I2C_Register(void)
 {
 	API_I2C_Register(s_i2cTable, HW_I2C_COUNT);
+
+	/* 根据 BusRate.h 中的 I2C_MODE 宏选择底层实现 */
+#if I2C_MODE == I2C_MODE_HARD
+	g_i2c_hal_ops = &g_i2c_hal_ops_hw;
+#else
+	g_i2c_hal_ops = &g_i2c_hal_ops_soft;
+#endif
 }
 
 /* SPI 注册：把板级 SPI 资源表登记到 API_SPI 模块。 */

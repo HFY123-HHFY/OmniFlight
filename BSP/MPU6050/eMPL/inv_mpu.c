@@ -45,8 +45,9 @@ static int i2c_read(unsigned char slave_addr, unsigned char reg_addr,
 
 #define delay_ms(ms)    Delay_ms((uint32_t)(ms))
 #define get_ms          mget_ms
-#define log_i           printf
-#define log_e           printf
+/* eMPL 库调试日志 — 飞控运行时关闭，避免污染串口输出 */
+#define log_i(...)
+#define log_e(...)
 #define fabs            fabsf
 #define min(a,b)        ((a<b)?a:b)
 

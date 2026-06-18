@@ -17,6 +17,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/artifacts)
 set(MCU_TARGET "AUTO" CACHE STRING "Target MCU family: AUTO/F103/F407/G3507")
 set_property(CACHE MCU_TARGET PROPERTY STRINGS AUTO F103 F407 G3507)
 
+set(I2C_MODE "AUTO" CACHE STRING "I2C implementation: AUTO (read BusRate.h) / SOFT / HARD")
+set_property(CACHE I2C_MODE PROPERTY STRINGS AUTO SOFT HARD)
+
 # AUTO 模式下，从 Enroll.h 的默认宏读取当前目标 MCU。
 if(MCU_TARGET STREQUAL "AUTO")
     file(READ "${CMAKE_SOURCE_DIR}/Enroll/Enroll.h" ENROLL_HEADER_CONTENT)
@@ -39,24 +42,32 @@ endif()
 
 message(STATUS "Resolved MCU target: ${RESOLVED_MCU_TARGET}")
 
+# AUTO 模式下，从 BusRate.h 读取 I2C_MODE。
+if(I2C_MODE STREQUAL "AUTO")
+    file(READ "${CMAKE_SOURCE_DIR}/SYSTEM/BusRate.h" BUSRATE_CONTENT)
+    string(REGEX MATCH "(^|[\r\n])[ \t]*#define[ \t]+I2C_MODE[ \t]+I2C_MODE_HARD([ \t]|[\r\n]|$)" I2C_IS_HARD "${BUSRATE_CONTENT}")
+    if(I2C_IS_HARD)
+        set(RESOLVED_I2C_MODE "HARD")
+    else()
+        set(RESOLVED_I2C_MODE "SOFT")
+    endif()
+else()
+    set(RESOLVED_I2C_MODE "${I2C_MODE}")
+endif()
+message(STATUS "Resolved I2C mode: ${RESOLVED_I2C_MODE}")
+
 ###############################################################
 # F103 平台专属配置与源文件
-# - 仅在 STM32F103 构建时生效
-# - 包含 F103 专属 BSP、头文件目录、MCU 源文件
 ###############################################################
 if(RESOLVED_MCU_TARGET STREQUAL "F103")
     set(ENROLL_MCU_TARGET_VALUE 0)
 ###############################################################
 # F407 平台专属配置与源文件
-# - 仅在 STM32F407 构建时生效
-# - 包含 F407 专属 BSP、头文件目录、MCU 源文件
 ###############################################################
 elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
     set(ENROLL_MCU_TARGET_VALUE 1)
 ###############################################################
 # MSPM0G3507 平台专属配置与源文件
-# - 仅在 MSPM0G3507 构建时生效
-# - 包含 G3507 专属头文件目录、MCU 源文件
 ###############################################################
 elseif(RESOLVED_MCU_TARGET STREQUAL "G3507")
     set(ENROLL_MCU_TARGET_VALUE 2)
@@ -67,19 +78,9 @@ endif()
 # ============================== 维护说明 ==============================
 #
 # 1) APP、API、SYS、ENROLL 层为三平台通用，只需维护一份源文件列表（见下方变量）。
-#    - 新增/删除 .c 文件，直接在 APP_LAYER_SOURCES、API_LAYER_SOURCES、SYS_LAYER_SOURCES、ENROLL_LAYER_SOURCES 里增删。
-#    - 这几层所有 MCU 都会自动引用，无需分平台重复写。
-#
 # 2) BSP 层（BSP_LAYER_SOURCES）按“公共 + 每个 MCU 独立追加”维护。
-#    - 公共驱动放 BSP_LAYER_SOURCES。
-#    - 各 MCU 专属驱动放各自分支中的 list(APPEND BSP_LAYER_SOURCES ...)。
-#
-# 3) 头文件目录按“通用 + 平台专属”维护：
-#    - 通用目录放 COMMON_INCLUDE_DIRS / BSP_COMMON_INCLUDE_DIRS。
-#    - 平台差异目录仅在各 MCU 分支追加。
-#
+# 3) 头文件目录按“通用 + 平台专属”维护。
 # 4) MCU_SOURCES 只放各自平台专属代码。
-#
 # 5) 改完后验证：
 #    - 重新 Configure/Build；若报“undefined reference”通常是漏加 .c 文件。
 #    - 若报“header not found”通常是漏加头文件目录到 MCU_INCLUDE_DIRS。
@@ -101,6 +102,7 @@ set(SYS_LAYER_SOURCES
 )
 
 # API 层：对上提供统一外设接口，对下分发到 MCU Core 实现。
+# 注意：soft_i2c_ops.c 仅在 SOFT 模式下追加（见下方 I2C 模式选择块）。
 set(API_LAYER_SOURCES
     ${CMAKE_SOURCE_DIR}/API/src/adc.c
     ${CMAKE_SOURCE_DIR}/API/src/exti.c
@@ -168,11 +170,9 @@ if(RESOLVED_MCU_TARGET STREQUAL "F103")
     set(MCU_CPU_FLAGS -mcpu=cortex-m3 -mthumb)
     set(MCU_FPU_FLAGS)
     set(MCU_DEFINITIONS STM32F10X_MD)
-    # F103 专属 BSP（独立维护，不与其他 MCU 合并）
     list(APPEND BSP_LAYER_SOURCES
         ${CMAKE_SOURCE_DIR}/BSP/NRF24L01/NRF24L01.c
     )
-    # F103 专属头文件目录和源文件
     set(MCU_INCLUDE_DIRS
         ${COMMON_INCLUDE_DIRS}
         ${BSP_COMMON_INCLUDE_DIRS}
@@ -182,7 +182,6 @@ if(RESOLVED_MCU_TARGET STREQUAL "F103")
         ${CMAKE_SOURCE_DIR}/Core/STM32F103/f103_soft_spi
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_STM32F1/Start
     )
-    # F103 专属 MCU 驱动实现
     set(MCU_SOURCES
         ${CMAKE_SOURCE_DIR}/Core/STM32F103/f103_delay.c
         ${CMAKE_SOURCE_DIR}/Core/STM32F103/f103_soft_i2c/f103_soft_i2c.c
@@ -205,7 +204,7 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
     set(MCU_CPU_FLAGS -mcpu=cortex-m4 -mthumb)
     set(MCU_FPU_FLAGS -mfpu=fpv4-sp-d16 -mfloat-abi=hard)
     set(MCU_DEFINITIONS STM32F40_41xxx)
-    # F407 专属 BSP（独立维护，不与其他 MCU 合并）
+    # F407 专属 BSP
     list(APPEND BSP_LAYER_SOURCES
         ${CMAKE_SOURCE_DIR}/BSP/BMP280/BMP280.c
         ${CMAKE_SOURCE_DIR}/BSP/NRF24L01/NRF24L01.c
@@ -214,7 +213,7 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
         ${CMAKE_SOURCE_DIR}/BSP/Motor/Motor.c
         ${CMAKE_SOURCE_DIR}/BSP/Buzzer/Buzzer.c
     )
-    # F407 专属头文件目录和源文件
+    # F407 专属头文件目录
     set(MCU_INCLUDE_DIRS
         ${COMMON_INCLUDE_DIRS}
         ${BSP_COMMON_INCLUDE_DIRS}
@@ -225,14 +224,12 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
         ${CMAKE_SOURCE_DIR}/BSP/Motor
         ${CMAKE_SOURCE_DIR}/BSP/Buzzer
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/inc
-        ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_i2c
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_spi
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_STM32F4/Start
     )
-    # F407 专属 MCU 驱动实现
+    # F407 专属 MCU 驱动（不含 I2C，I2C 在下方切换块中条件追加）
     set(MCU_SOURCES
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_delay.c
-        ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_i2c/f407_soft_i2c.c
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_spi/f407_soft_spi.c
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/src/f407_exti.c
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/src/f407_adc.c
@@ -245,6 +242,29 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_STM32F4/Start/system_stm32f4xx.c
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_STM32F4/Start/startup_stm32f407vetx_gcc.c
     )
+
+    # ═══════════════════════════════════════════════════════════
+    # I2C 模式切换：SOFT (bit-bang) / HARD (片上 I2C1)
+    # ═══════════════════════════════════════════════════════════
+    if(RESOLVED_I2C_MODE STREQUAL "HARD")
+        list(APPEND MCU_SOURCES
+            ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_hw_i2c/f407_hw_i2c.c
+        )
+        list(APPEND MCU_INCLUDE_DIRS
+            ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_hw_i2c
+        )
+    else()
+        list(APPEND API_LAYER_SOURCES
+            ${CMAKE_SOURCE_DIR}/API/API_I2C/i2c_soft.c
+        )
+        list(APPEND MCU_SOURCES
+            ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_i2c/f407_soft_i2c.c
+        )
+        list(APPEND MCU_INCLUDE_DIRS
+            ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_i2c
+        )
+    endif()
+
 elseif(RESOLVED_MCU_TARGET STREQUAL "G3507")
     set(TARGET_NAME OmniLayer_MSPM0G3507)
     set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/Core/MSPM0G3507/cmake/mspm0g3507.lds)
@@ -253,11 +273,9 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "G3507")
     set(MCU_CPU_FLAGS -mcpu=cortex-m0plus -mthumb)
     set(MCU_FPU_FLAGS)
     set(MCU_DEFINITIONS __MSPM0G3507__)
-    # G3507 专属 BSP（独立维护，不与其他 MCU 合并）
     list(APPEND BSP_LAYER_SOURCES
         # ${CMAKE_SOURCE_DIR}/BSP/TB6612/TB6612.c
     )
-    # G3507 专属头文件目录和源文件
     set(MCU_INCLUDE_DIRS
         ${COMMON_INCLUDE_DIRS}
         ${BSP_COMMON_INCLUDE_DIRS}
@@ -269,7 +287,6 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "G3507")
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_M0G3507/source/ti/devices/msp/m0p
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_M0G3507/source/third_party/CMSIS/Core/Include
     )
-    # G3507 专属 MCU 驱动实现
     set(MCU_SOURCES
         ${CMAKE_SOURCE_DIR}/Core/MSPM0G3507/G3507_delay.c
         ${CMAKE_SOURCE_DIR}/Core/MSPM0G3507/G3507_sys.c
@@ -292,12 +309,8 @@ else()
     message(FATAL_ERROR "Unsupported MCU target: ${RESOLVED_MCU_TARGET}")
 endif()
 
-
-
 ###############################################################
-# 汇总所有层的源文件，形成最终构建目标源文件列表
-# - APP/API/SYS/ENROLL/BSP/MCU 层全部拼接
-# - 便于统一管理和后续维护
+# 汇总所有层的源文件
 ###############################################################
 set(TARGET_SOURCES
     ${APP_LAYER_SOURCES}
@@ -308,29 +321,12 @@ set(TARGET_SOURCES
     ${MCU_SOURCES}
 )
 
-
-###############################################################
-# 构建最终可执行文件（固件 ELF）
-# - ${TARGET_NAME} 由平台分支决定
-# - ${TARGET_SOURCES} 为所有参与编译的源文件
-###############################################################
 add_executable(${TARGET_NAME} ${TARGET_SOURCES})
 
-
-###############################################################
-# 添加头文件搜索路径
-# - ${MCU_INCLUDE_DIRS} 已包含通用+平台专属目录
-###############################################################
 target_include_directories(${TARGET_NAME} PRIVATE
     ${MCU_INCLUDE_DIRS}
 )
 
-
-###############################################################
-# 添加编译宏定义
-# - ENROLL_MCU_TARGET 及各平台标志
-# - ${MCU_DEFINITIONS} 为平台专属宏
-###############################################################
 target_compile_definitions(${TARGET_NAME} PRIVATE
     ENROLL_MCU_F103=0
     ENROLL_MCU_F407=1
@@ -339,11 +335,6 @@ target_compile_definitions(${TARGET_NAME} PRIVATE
     ${MCU_DEFINITIONS}
 )
 
-
-###############################################################
-# 添加编译器选项
-# - CPU/FPU 架构、警告开关等
-###############################################################
 target_compile_options(${TARGET_NAME} PRIVATE
     ${MCU_CPU_FLAGS}
     ${MCU_FPU_FLAGS}
@@ -351,11 +342,6 @@ target_compile_options(${TARGET_NAME} PRIVATE
     -Wextra
 )
 
-
-###############################################################
-# 添加链接器选项
-# - 指定链接脚本、浮点格式、内存优化等
-###############################################################
 target_link_options(${TARGET_NAME} PRIVATE
     ${MCU_CPU_FLAGS}
     ${MCU_FPU_FLAGS}
@@ -369,20 +355,13 @@ target_link_options(${TARGET_NAME} PRIVATE
     -Wl,--print-memory-usage
 )
 
-
-###############################################################
-# 链接标准库
-# - m: 数学库
-# - c: 标准C库
-###############################################################
 target_link_libraries(${TARGET_NAME} PRIVATE
     m
     c
 )
 
-
 ###############################################################
-# 生成常用烧录文件格式（hex/bin）及打印固件大小
+# 生成 hex/bin 及打印大小
 ###############################################################
 add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${TARGET_NAME}> ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${TARGET_NAME}.hex
@@ -391,11 +370,8 @@ add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
     COMMENT "Generate .hex/.bin and print size"
 )
 
-
 ###############################################################
-# OpenOCD 烧录/擦除目标
-# - flash: 烧录固件，G3507 跳过 verify 加速
-# - erase: 全片擦除
+# OpenOCD 烧录/擦除
 ###############################################################
 add_custom_target(flash
     COMMAND openocd -f ${OPENOCD_CFG} -c "program $<TARGET_FILE:${TARGET_NAME}> $<IF:$<STREQUAL:${RESOLVED_MCU_TARGET},G3507>,,verify> reset exit"

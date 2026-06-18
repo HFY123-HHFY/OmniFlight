@@ -63,9 +63,9 @@ int main(void)
 /* 通信协议初始化 */
 	API_I2C_Init();						/* 软件 I2C 初始化 */
 	API_SPI_Init();						/* 软件 SPI 初始化 */
-	// App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
+	App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
 	// App_SPI_TestOnce();				/* 开机执行一次 SPI 测试 */
-
+ 
 /*BSP硬件抽象层初始化*/
 	LED_Init(LED_LOW); // 初始化LED-低电平
 	MPU_Init();	/* 初始化MPU6050 */
@@ -74,7 +74,7 @@ int main(void)
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 
 	/* 陀螺零偏校准：飞行器必须保持静止！LED3 亮=校准中，灭=完成 */
-	GyroBias_Calibrate(1000U);
+	// GyroBias_Calibrate(1000U);
 
 	QMC_Init();		/* 初始化QMC5883P */
 	BMP280Init();	/* 初始化BMP280 */
@@ -106,7 +106,7 @@ int main(void)
 		if (pid_task_flag != 0U)
 		{
 			pid_task_flag = 0U;
-			PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
+			// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
 		}
 
 	/* ── Phase 2: 遥控链路 (100Hz) ─────────────────── */
@@ -142,7 +142,7 @@ int main(void)
 		{
 			print_task_flag = 0U;
 			// usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
-			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
+			usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}
 	#endif
