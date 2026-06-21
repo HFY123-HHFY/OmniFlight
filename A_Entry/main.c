@@ -63,7 +63,7 @@ int main(void)
 /* 通信协议初始化 */
 	API_I2C_Init();						/* 软件 I2C 初始化 */
 	API_SPI_Init();						/* 软件 SPI 初始化 */
-	App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
+	// App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
 	// App_SPI_TestOnce();				/* 开机执行一次 SPI 测试 */
  
 /*BSP硬件抽象层初始化*/
@@ -77,6 +77,11 @@ int main(void)
 	// GyroBias_Calibrate(1000U);
 
 	QMC_Init();		/* 初始化QMC5883P */
+
+#if (QMC_CAL_ENABLE == 1U)
+	QMC_CalibBegin();	/* 磁力计校准：开始采集 min/max */
+#endif
+
 	BMP280Init();	/* 初始化BMP280 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
 	PID_Contorl_Init();	/* 初始化PID控制 */
@@ -102,8 +107,8 @@ int main(void)
 		if (mpu_flag == 1U)
 		{
 			mpu_flag = 0U;
-			mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
-			MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
+			// mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
+			// MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
 			/* MPU_Get_Accelerometer(&aacx, &aacy, &aacz); */
 		}
 
@@ -114,7 +119,7 @@ int main(void)
 		if (nrf_task_flag != 0U)
 		{
 			nrf_task_flag = 0U;
-			NRF24L01_Data();
+			// NRF24L01_Data();
 		}
 
 	/* 磁力计 (50Hz) + 气压计 (20Hz) */
@@ -128,7 +133,7 @@ int main(void)
 		if (bmp_task_flag != 0U)
 		{
 			bmp_task_flag = 0U;
-			alt = BMP_Data();
+			// alt = BMP_Data();
 		}
 
 	/* 串口打印 (10Hz) */
@@ -136,8 +141,8 @@ int main(void)
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
-			// usart_printf(USART1, "Angle_XY: %.2f, alt: %.2f\r\n", Angle_XY, alt);
-			usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
+			usart_printf(USART1, "Angle_XY: %.2f\r\n", Angle_XY);
+			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}
 	#endif

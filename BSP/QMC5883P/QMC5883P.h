@@ -29,6 +29,35 @@ extern "C" {
 /* 最近一次计算得到的 XY 平面航向角（单位：度，范围 0~360） */
 extern float Angle_XY;
 
+/* =========================================================================
+ * 磁力计校准
+ *
+ * 硬铁偏移 (offset)：PCB 上永磁体/大电流走线造成的固定偏置
+ * 软铁缩放 (scale)：铁磁材料造成的椭圆畸变
+ *
+ * 校准流程:
+ *   1. 取消 QMC_CAL_ENABLE 的注释
+ *   2. 水平旋转飞行器 30 秒
+ *   3. 串口输出 "QMC_CAL: offset_x=... offset_y=... scale_x=... scale_y=..."
+ *   4. 把输出的四个值填入下面的宏
+ *   5. 重新注释 QMC_CAL_ENABLE
+ * ========================================================================= */
+
+/* 设为 1 开启校准模式（采集 min/max），校准完成后改回 0 */
+#define QMC_CAL_ENABLE          0U
+
+/* 校准参数 — 运行一次校准后填入 */
+#define QMC_CAL_OFFSET_X        -2175
+#define QMC_CAL_OFFSET_Y        2600
+#define QMC_CAL_SCALE_X         1.0429f
+#define QMC_CAL_SCALE_Y         0.9605f
+
+/* 校准 API */
+void    QMC_CalibBegin(void);
+void    QMC_CalibSample(int16_t x, int16_t y);
+void    QMC_CalibEnd(void);
+uint8_t QMC_CalibIsDone(void);
+
 /*
  * 初始化 QMC5883P：
  * - 配置连续测量模式
