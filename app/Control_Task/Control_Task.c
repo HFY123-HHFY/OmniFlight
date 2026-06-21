@@ -35,7 +35,7 @@ volatile uint8_t print_task_flag = 0U;   /* 10Hz  串口打印          */
  * ========================================================================= */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
-	static uint8_t pid_2ms_tick = 0U;
+	static uint8_t  pid_2ms_tick = 0U;
 
 	if (id != API_TIM1)
 	{

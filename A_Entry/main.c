@@ -98,7 +98,7 @@ int main(void)
 
 	while (1)
 	{
-
+	/* MPU6050数据读取（陀螺仪 + DMP 姿态）*/
 		if (mpu_flag == 1U)
 		{
 			mpu_flag = 0U;
