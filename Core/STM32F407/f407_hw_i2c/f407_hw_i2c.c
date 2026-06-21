@@ -164,6 +164,15 @@ static void hw_start(void)
 	to = 5000U;
 	while ((I2C->SR2 & SR2_BUSY) && --to) {}
 
+	/* 总线卡死恢复：发 STOP 释放，确保上次事务不影响本次 */
+	if (to == 0U)
+	{
+		I2C->CR1 |= CR1_STOP;
+		Delay_us(2U);
+		to = 5000U;
+		while ((I2C->SR2 & SR2_BUSY) && --to) {}
+	}
+
 	/* 清除残留错误标志 */
 	clear_flags();
 
