@@ -16,7 +16,7 @@ short aacx = 0, aacy = 0, aacz = 0;          /*        加速度 ,x轴、y轴、
 /*short短整型，16位有符号整数，范围-32768~32767，单位：m/s^2, %hd*/
 
 /* mpu6050 中断标志位 */
-uint8_t mpu_flag = 0U;
+volatile uint8_t mpu_flag = 0U;
 
 #define MPU6050_EXTI_DEFAULT_TRIGGER        SYS_EXTI_TRIGGER_RISING // 上升沿触发
 #define MPU6050_EXTI_DEFAULT_PREEMPT_PRIO   (0U)
@@ -56,16 +56,4 @@ void MPU6050_EXTI_Callback(API_EXTI_Id_t id, void *userData)
 	(void)id;
 	(void)userData;
 	mpu_flag = 1U;
-}
-
-/* 获取 MPU6050 角度信息 */
-void mpu_angle(void)
-{
-	if (mpu_flag == 1U)
-	{
-		mpu_flag = 0U;
-		mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
-		MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
-		/* MPU_Get_Accelerometer(&aacx, &aacy, &aacz); */
-	}
 }

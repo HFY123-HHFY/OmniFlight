@@ -98,29 +98,26 @@ int main(void)
 
 	while (1)
 	{
-	/* ── Phase 1: 姿态与控制 (500Hz) ───────────────── */
-	/*     陀螺仪 + 串级 PID + 混控 + DShot 电机输出    */
 
-		mpu_angle();
-
-		if (pid_task_flag != 0U)
+		if (mpu_flag == 1U)
 		{
-			pid_task_flag = 0U;
-			// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
+			mpu_flag = 0U;
+			mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
+			MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
+			/* MPU_Get_Accelerometer(&aacx, &aacy, &aacz); */
 		}
 
-	/* ── Phase 2: 遥控链路 (100Hz) ─────────────────── */
-	/*     NRF24L01 收发：遥控输入 + 遥测回传           */
-
+	/* 
+	 * 遥控链路 (100Hz) 
+	 * NRF24L01 收发：遥控输入 + 遥测回传
+	*/
 		if (nrf_task_flag != 0U)
 		{
 			nrf_task_flag = 0U;
 			NRF24L01_Data();
 		}
 
-	/* ── Phase 3: 导航传感器 ──────────────────────── */
-	/*     QMC5883P (50Hz) → Yaw 漂移融合              */
-	/*     BMP280   (20Hz) → 定高环 PID 输入            */
+	/* 磁力计 (50Hz) + 气压计 (20Hz) */
 
 		if (qmc_task_flag != 0U)
 		{
@@ -134,9 +131,7 @@ int main(void)
 			alt = BMP_Data();
 		}
 
-	/* ── Phase 4: 调试输出 (10Hz) ──────────────────── */
-	/*     起飞前将文件头 DEBUG_PRINT_ENABLE 设为 0      */
-
+	/* 串口打印 (10Hz) */
 	#if (DEBUG_PRINT_ENABLE == 1U)
 		if (print_task_flag != 0U)
 		{

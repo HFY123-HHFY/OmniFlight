@@ -6,6 +6,7 @@
 #include "Control/Control.h"
 #include "Dshot.h"
 #include "Motor.h"
+#include "MPU6050.h"
 
 /* =========================================================================
  * 任务标志位
@@ -16,9 +17,6 @@
 
 /* 程序运行的时间戳（s），TIM2 每 1s 递增 */
 uint32_t Timer_Bsp_t = 0;
-
-/* TIM1 分发：PID 控制节拍 (500Hz) */
-volatile uint8_t pid_task_flag = 0U;
 
 /* TIM2 分发：慢速外设任务 */
 volatile uint8_t nrf_task_flag   = 0U;   /* 100Hz NRF24L01 遥控通信 */
@@ -49,7 +47,7 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 	if (pid_2ms_tick >= 2U)
 	{
 		pid_2ms_tick = 0U;
-		pid_task_flag = 1U;
+		// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
 	}
 }
 
