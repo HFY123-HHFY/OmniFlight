@@ -146,7 +146,13 @@ static void hw_init(void *sclPort, uint32_t sclPin_, uint32_t sclIomux,
 
 static void hw_select(void *sp, uint32_t sP, uint32_t sI, void *dp, uint32_t dP, uint32_t dI)
 {
-	hw_init(sp, sP, sI, dp, dP, dI);
+	(void)sI; (void)dI;
+	/* 只更新引脚引用，不重初始化 — hw_init 已在系统启动时完成 */
+	I2C     = I2C1;
+	sclGpio = (F407_GPIO_Regs_t *)sp;
+	sdaGpio = (F407_GPIO_Regs_t *)dp;
+	sclPin  = sP;
+	sdaPin  = dP;
 }
 
 /* ── Start ── */
@@ -155,7 +161,7 @@ static void hw_start(void)
 	uint32_t to;
 
 	/* 确保总线空闲 */
-	to = 100000U;
+	to = 5000U;
 	while ((I2C->SR2 & SR2_BUSY) && --to) {}
 
 	/* 清除残留错误标志 */
@@ -164,7 +170,7 @@ static void hw_start(void)
 	/* 产生 START */
 	I2C->CR1 |= CR1_START;
 
-	to = 100000U;
+	to = 5000U;
 	while (!(I2C->SR1 & SR1_SB) && --to) {}
 
 	last_ack = 0U;
@@ -174,7 +180,7 @@ static void hw_start(void)
 static void hw_stop(void)
 {
 	I2C->CR1 |= CR1_STOP;
-	uint32_t to = 100000U;
+	uint32_t to = 5000U;
 	while ((I2C->SR2 & SR2_BUSY) && --to) {}
 }
 
@@ -193,7 +199,7 @@ static void hw_send_byte(uint8_t data)
 		/* ── 地址阶段 ── */
 		I2C->DR = data;
 
-		to = 100000U;
+		to = 5000U;
 		while (!(I2C->SR1 & SR1_ADDR) && --to) {}
 
 		/* 捕获 AF：ADDR 和 AF 在同一时刻被硬件置位 */
@@ -206,12 +212,12 @@ static void hw_send_byte(uint8_t data)
 	else
 	{
 		/* ── 数据阶段 ── */
-		to = 100000U;
+		to = 5000U;
 		while (!(I2C->SR1 & SR1_TXE) && --to) {}
 
 		I2C->DR = data;
 
-		to = 100000U;
+		to = 5000U;
 		while (!(I2C->SR1 & SR1_BTF) && --to) {}
 
 		/* BTF 和 AF 同时置位 */
@@ -238,7 +244,7 @@ static uint8_t hw_recv_byte(uint8_t ack)
 	if (ack) I2C->CR1 |=  CR1_ACK;
 	else     I2C->CR1 &= ~CR1_ACK;
 
-	to = 100000U;
+	to = 5000U;
 	while (!(I2C->SR1 & SR1_RXNE) && --to) {}
 
 	return (uint8_t)I2C->DR;
@@ -249,6 +255,7 @@ static void hw_nack(void) {}
 
 static void hw_set_speed(uint32_t khz)
 {
+	if (khz == speedKhz) return;  /* 速率未变，跳过 PE 开关 */
 	speedKhz = khz;
 	I2C->CR1 &= ~CR1_PE;
 	config_timing(khz);
