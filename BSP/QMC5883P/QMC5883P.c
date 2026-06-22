@@ -68,6 +68,10 @@ void QMC_Init(void)
 {
 	QMC_WriteReg(QMC5883P_REG_CONTROL1, 0xFFU);
 	QMC_WriteReg(QMC5883P_REG_CONTROL2, 0x01U);
+
+#if (QMC_CAL_ENABLE == 1U)
+	QMC_CalibBegin();
+#endif
 }
 
 /* 读取三轴原始磁场数据 — 一次 I2C 突发读 6 字节保证数据一致性。 */
@@ -211,8 +215,8 @@ float QMC_Data(void)
 	cal_x = ((float)x - (float)QMC_CAL_OFFSET_X) * QMC_CAL_SCALE_X;
 	cal_y = ((float)y - (float)QMC_CAL_OFFSET_Y) * QMC_CAL_SCALE_Y;
 
-	/* atan2f 输出范围为 [-180,180]，加 180 后映射到 [0,360]。 */
-	Angle_XY_temp = atan2f(cal_y, cal_x) * 57.2957795f + 180.0f;
+	/* atan2f 输出 [-180,180]，加 180 映射到 [0,360]，取反匹配指南针方向 */
+	Angle_XY_temp = -(atan2f(cal_y, cal_x) * 57.2957795f) + 180.0f;
 	Angle_XY = Angle_XY_temp;
 	return Angle_XY_temp;
 }

@@ -76,12 +76,7 @@ int main(void)
 	/* 陀螺零偏校准：飞行器必须保持静止！LED3 亮=校准中，灭=完成 */
 	// GyroBias_Calibrate(1000U);
 
-	QMC_Init();		/* 初始化QMC5883P */
-
-#if (QMC_CAL_ENABLE == 1U)
-	QMC_CalibBegin();	/* 磁力计校准：开始采集 min/max */
-#endif
-
+	QMC_Init();		/* 初始化QMC5883P（校准模式自动触发） */
 	BMP280Init();	/* 初始化BMP280 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
 	PID_Contorl_Init();	/* 初始化PID控制 */
@@ -103,6 +98,7 @@ int main(void)
 
 	while (1)
 	{
+
 	/* MPU6050数据读取（陀螺仪 + DMP 姿态）*/
 		if (mpu_flag == 1U)
 		{
