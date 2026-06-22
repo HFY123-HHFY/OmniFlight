@@ -27,17 +27,18 @@
               ↓
 ┌────────────────────────────────────────┐
 │  app/           应用层 — 飞控核心算法   │
-│  Control/       串级PID + 混控 + 电机   │
-│  Control_Task/  中断回调 + 任务标志     │
+│  Control/       串级PID + 混控 + 陀螺校准│
+│  Control_Task/  中断回调 + 任务标志调度  │
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
+│  IMU/           偏航角互补滤波融合       │
 │  My_Usart/      串口管理 + printf       │
 └────────────────────────────────────────┘
               ↓
 ┌────────────────────────────────────────┐
 │  BSP/           板级支持层              │
-│  MPU6050/ QMC5883P/ BMP280/            │  传感器驱动
-│  NRF24L01/      2.4G 无线              │
+│  MPU6050/ QMC5883P/ BMP280/            │  传感器驱动（含校准）
+│  NRF24L01/      2.4G 无线（软件 SPI）   │
 │  Dshot/         DShot300 油门协议       │
 │  Motor/         电机混控               │
 │  Buzzer/        蜂鸣器                 │
@@ -84,12 +85,12 @@
 
 | 功能 | 引脚 | 外设 | 说明 |
 |------|------|------|------|
-| I2C SCL | PB8 | 软件 I2C | MPU/QMC/BMP 共用 |
-| I2C SDA | PB9 | 软件 I2C | |
-| MPU6050 INT | PE7 | EXTI | DMP 数据就绪 |
-| NRF SCK | PA5 | SPI1 | 软件 SPI |
-| NRF MOSI | PA7 | SPI1 | |
-| NRF MISO | PA6 | SPI1 | |
+| I2C SCL | PB8 | 硬件 I2C1 | MPU/QMC/BMP 共用 |
+| I2C SDA | PB9 | 硬件 I2C1 | |
+| MPU6050 INT | PE7 | EXTI | DMP 数据就绪 (200Hz) |
+| NRF SCK | PA5 | 软件 SPI | NRF24L01 |
+| NRF MOSI | PA7 | 软件 SPI | |
+| NRF MISO | PA6 | 软件 SPI | |
 | NRF CS | PC4 | GPIO | |
 | NRF CE | PC5 | GPIO | Enroll 注册 |
 | 电机1 | PE9 | TIM1 CH1 | DShot300 |
@@ -105,13 +106,68 @@
 
 ## 5. 飞控核心设计
 
-### 5.1 串级 PID
+### 5.1 传感器数据流
 
 ```
-目标角度 (遥控器) → 角度环 PID (外环 250Hz) → 角速度环 PID (内环 500Hz) → 混控 → DShot
+┌─────────────────────────────────────────────────────────────────┐
+│ TIM1 ISR (500Hz)                                                │
+│   gyroz → IMU_Yaw_IntegrateGyro  陀螺积分更新偏航角               │
+│   (PID_Pitch_Roll_Combined 待启用)                               │
+├─────────────────────────────────────────────────────────────────┤
+│ TIM2 ISR (1ms) → 任务标志调度                                    │
+│   10ms → nrf_task_flag   (100Hz)                                │
+│   20ms → qmc_task_flag   (50Hz)                                 │
+│   50ms → bmp_task_flag   (20Hz)                                 │
+│  100ms → print_task_flag (10Hz)                                 │
+│ 1000ms → Timer_Bsp_t++   (1Hz 时间戳)                            │
+├─────────────────────────────────────────────────────────────────┤
+│ 主循环 — 消费任务标志                                             │
+│   mpu_flag (200Hz)    → DMP Pitch/Roll + gyrox/gyroy/gyroz       │
+│   nrf_task_flag       → NRF24L01_Data() 遥控+遥测                │
+│   qmc_task_flag       → Angle_XY=QMC_Data() → IMU_Yaw_CorrectMag │
+│   bmp_task_flag       → alt=BMP_Data()                           │
+│   print_task_flag     → usart_printf 传感器数据                   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 DShot300 油门协议
+### 5.2 串级 PID 架构
+
+```
+目标角度 (遥控器) → 角度环 PID (外环 500Hz) → 角速度环 PID (内环 500Hz) → 混控 → DShot
+```
+
+- 外环：Pitch/Roll 角度 → 角速度目标（Out_max=±400°/s）
+- 内环：gyrox/gyroy 去偏+低通 → 电机输出（Out_max=2047）
+- 低通：alpha=0.45，截止频率 ~36Hz@500Hz
+
+### 5.3 偏航角融合 (IMU)
+
+MPU6050 DMP Yaw 存在长期漂移，改用互补滤波：
+
+```
+yaw += (gyro_z - bias) * dt        ← 陀螺积分 500Hz (TIM1 ISR)
+yaw += Kp * (mag - yaw)            ← 磁力计校正 50Hz (主循环)
+bias -= Ki * (mag - yaw)           ← 零偏在线补偿
+```
+
+- Kp=0.15, Ki=0.002
+- 上电 5 秒自动采集 gyro_z 零偏
+- 首次 QMC 数据直达起点，无收敛延迟
+- 输出：`IMU_Yaw` 全局变量 (0~360°)，替代 DMP Yaw
+- `IMU_Init()` 必须在 `API_TIM_Init(TIM1)` 之前调用
+
+### 5.4 传感器校准
+
+| 传感器 | 校准方式 | 耗时 | 说明 |
+|--------|----------|:---:|------|
+| MPU6050 Gyro X/Y | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U)` |
+| MPU6050 Gyro Z | IMU 互补滤波在线 PI | ~5s | TIM1 ISR 自动完成 |
+| QMC5883P | 硬铁 offset + 软铁 scale | 30s | 自动采集 min/max，参数写头文件 |
+| BMP280 | 地面气压归零 | 5s | `BMP280Init` 内部自动执行 |
+
+总启动时间：约 15 秒（陀螺 5s + QMC 5s + BMP 5s 可并行优化）
+
+### 5.5 DShot300 油门协议
 
 - TIM1 配置为 300kHz PWM 基波（ARR=560, PSC=1）
 - DMA2 Stream5 burst 模式，每次 TIM1 溢出自动更新 CCR1~CCR4
@@ -119,17 +175,21 @@
 - 油门范围：48~2047（0 停转，1~47 为保留命令区）
 - **重要**：电调需要从最低油门（48）逐步递增，不可直接跳到大油门值
 
-### 5.3 中断回调架构
+### 5.6 中断回调架构
 
-- `Control_Task1_Callback` → TIM3 1ms → pid_task_flag (2ms/500Hz)
-- `Control_Task2_Callback` → TIM2 1ms → print_task_flag (100ms)
+- `Control_Task1_Callback` → TIM1 1ms → pid_2ms_tick (2ms/500Hz) → IMU 积分 + PID
+- `Control_Task2_Callback` → TIM2 1ms → 所有任务标志调度
 - `Control_Task_USART_Callback` → USART1/3 → TX 队列排空 + RX 接收
 
-### 5.4 控制任务标志位
+### 5.7 任务标志位一览
 
-- `pid_task_flag` — 500Hz 姿态环触发
-- `print_task_flag` — 100ms 串口打印触发
-- NRF24L01 在主循环轮询（无中断）
+| 标志 | 频率 | ISR 源 | 主循环消费 |
+|------|:---:|--------|------------|
+| `mpu_flag` | 200Hz | MPU6050 EXTI | DMP + Gyro 读取 |
+| `nrf_task_flag` | 100Hz | TIM2 | NRF24L01_Data() |
+| `qmc_task_flag` | 50Hz | TIM2 | QMC_Data() → IMU_Yaw_CorrectMag() |
+| `bmp_task_flag` | 20Hz | TIM2 | BMP_Data() |
+| `print_task_flag` | 10Hz | TIM2 | usart_printf |
 
 ---
 
@@ -160,13 +220,18 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 - 未注册回调时退化到阻塞发送，不会崩溃
 - `Enroll_USART_RegisterIrqHandler` 必须调用，否则 TXE 中断无限循环
 
-### 6.3 软件总线双分层
+### 6.3 I2C 总线设计
 
-```
-API/API_I2C/API_I2C.c   ← 协议逻辑 (平台无关)
-    ↓ soft_i2c_hal.h 桥接
-Core/STM32F407/f407_soft_i2c/  ← GPIO 翻转+延时 (平台相关)
-```
+- 三个设备共享 I2C1（PB8/PB9）：MPU6050（0xD0）、QMC5883P（0x58）、BMP280（0xEC）
+- 统一 400kHz Fast Mode
+- 所有 I2C 读写均在主循环执行，ISR 不访问 I2C，避免硬件 I2C 状态机死锁
+- `BMP280_SelectI2CSpeed()` 每次 I2C 事务前选择总线+速率（BMP280 20Hz，开销可忽略）
+
+### 6.4 NRF24L01 软件 SPI
+
+- 使用软件 SPI（非硬件 SPI1），100Hz 轮询足够
+- 硬件 SPI 存在与硬件 I2C 相同的不可重入问题，主循环传输若被 ISR 打断会丢数据
+- 无其他 SPI 设备竞争，软件 SPI 带宽（~4MHz）远超 NRF 需求
 
 ---
 
@@ -175,9 +240,9 @@ Core/STM32F407/f407_soft_i2c/  ← GPIO 翻转+延时 (平台相关)
 | 优先级 | 中断源 | 理由 |
 |:---:|------|------|
 | 0 | SysTick | 系统心跳基准 |
-| 1 | TIM3 (API_TIM1) | 1ms 控制节拍，PID/混控心脏 |
-| 2 | MPU6050 EXTI | 姿态数据，串级外环输入 |
-| 3 | TIM2 (API_TIM2) | printf / 时间戳 |
+| 1 | TIM1 (API_TIM1) | 1ms 控制节拍，PID/IMU/混控核心 |
+| 2 | MPU6050 EXTI | DMP 数据就绪，姿态外环输入 |
+| 3 | TIM2 (API_TIM2) | 任务标志调度 / 时间戳 |
 | 4 | USART1/3 | 通信（丢包可重传） |
 
 ---
@@ -186,13 +251,14 @@ Core/STM32F407/f407_soft_i2c/  ← GPIO 翻转+延时 (平台相关)
 
 | 模块 | 依赖层 | 说明 |
 |------|--------|------|
-| LED | API_GPIO | Enroll 注册 |
-| MPU6050 | API_I2C + EXTI | DMP 姿态解算 |
-| QMC5883P | API_I2C | 地磁航向 |
-| BMP280 | API_I2C | 气压高度 |
-| NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测 |
+| LED | API_GPIO | Enroll 注册，校准状态指示 |
+| MPU6050 | API_I2C + EXTI | DMP 姿态解算 + 陀螺原始值 |
+| QMC5883P | API_I2C | 地磁航向（含硬铁/软铁校准） |
+| BMP280 | API_I2C | 气压高度（含地面归零校准） |
+| NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
+| IMU | MPU6050 + QMC5883P | 偏航角互补滤波融合 |
 | Dshot | Core f407_pwm + f407_dma | DShot300 油门 |
-| Motor | Dshot + Control | 混控反饱和 |
+| Motor | Dshot + Control | 电机混控反饱和 |
 | Buzzer | API_PWM | 无源蜂鸣器 |
 
 ---
@@ -204,6 +270,9 @@ Core/STM32F407/f407_soft_i2c/  ← GPIO 翻转+延时 (平台相关)
 3. **DShot 电调**：油门值需从最低（48）逐步递增，电调才响应
 4. **printf 异步 TX**：必须注册 USART 中断回调，否则 TX 队列不会排空
 5. **F407 以外平台**：f407_dma、Dshot、Motor、Buzzer 仅在 F407 编译
+6. **IMU_Init 顺序**：必须在 `API_TIM_Init(TIM1)` 之前调用，否则 ISR 访问未初始化状态
+7. **上电静止**：飞行器需静止 ~15s（陀螺 5s + QMC 5s + BMP 5s）完成所有传感器校准
+8. **I2C 总线**：所有 I2C 读写仅在主循环，ISR 不触碰 I2C（硬件 I2C 不可重入）
 
 ---
 
@@ -213,7 +282,9 @@ Core/STM32F407/f407_soft_i2c/  ← GPIO 翻转+延时 (平台相关)
 2. 本文档 — 架构全貌
 3. [A_Entry/main.c](A_Entry/main.c) — 飞控初始化 → 主循环
 4. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
-5. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
-6. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级
-7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 中断回调
-8. [CMakeLists.txt](CMakeLists.txt) — 构建入口
+5. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
+6. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 中断回调 + 任务调度
+7. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
+8. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
+9. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级
+10. [CMakeLists.txt](CMakeLists.txt) — 构建入口
