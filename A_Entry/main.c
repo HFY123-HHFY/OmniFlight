@@ -33,6 +33,7 @@
 #include "Dshot.h" /* DShot协议 初始化 */
 #include "NRF24L01.h"
 #include "Buzzer.h"
+#include "IMU.h"
 
 int main(void)
 {
@@ -65,7 +66,7 @@ int main(void)
 	API_SPI_Init();						/* 软件 SPI 初始化 */
 	// App_I2C_ScanOnce();				/* 开机执行一次 I2C 扫描 */
 	// App_SPI_TestOnce();				/* 开机执行一次 SPI 测试 */
- 
+
 /*BSP硬件抽象层初始化*/
 	LED_Init(LED_LOW); // 初始化LED-低电平
 	MPU_Init();	/* 初始化MPU6050 */
@@ -79,6 +80,7 @@ int main(void)
 	QMC_Init();		/* 初始化QMC5883P（校准模式自动触发） */
 	BMP280Init();	/* 初始化BMP280 */
 	NRF24L01_Init();	/* 初始化NRF24L01 */
+	IMU_Init();			/* IMU 偏航融合初始化 */
 	PID_Contorl_Init();	/* 初始化PID控制 */
 	DShot_Init();	/* 初始化DShot协议 */
 	Buzzer_Init();	/* 所有外设初始化完成-蜂鸣器初始化 */
@@ -98,14 +100,13 @@ int main(void)
 
 	while (1)
 	{
-
 	/* MPU6050数据读取（陀螺仪 + DMP 姿态）*/
 		if (mpu_flag == 1U)
 		{
 			mpu_flag = 0U;
-			// mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
-			// MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
-			/* MPU_Get_Accelerometer(&aacx, &aacy, &aacz); */
+			mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
+			MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
+			// MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
 		}
 
 	/* 
@@ -124,6 +125,7 @@ int main(void)
 		{
 			qmc_task_flag = 0U;
 			Angle_XY = QMC_Data();
+			IMU_Yaw_CorrectMag(Angle_XY);   /* 磁力计校正偏航漂移 */
 		}
 
 		if (bmp_task_flag != 0U)
@@ -137,7 +139,7 @@ int main(void)
 		if (print_task_flag != 0U)
 		{
 			print_task_flag = 0U;
-			usart_printf(USART1, "Angle_XY: %.2f\r\n", Angle_XY);
+			usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", (double)Angle_XY, (double)IMU_Get_Yaw(), (double)((float)gyroz / GYRO_SENS_2000DPS), (double)IMU_Get_GyroBias());
 			// usart_printf(USART1, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw);
 			// usart_printf(USART3, "Pitch=%.2f Roll=%.2f Yaw=%.2f\r\n", Pitch, Roll, Yaw); /* 无线串口 */
 		}

@@ -94,6 +94,7 @@ set(APP_LAYER_SOURCES
     ${CMAKE_SOURCE_DIR}/app/Control_Task/Control_Task.c
     ${CMAKE_SOURCE_DIR}/app/PID/PID.c
     ${CMAKE_SOURCE_DIR}/app/Filter/Filter.c
+    ${CMAKE_SOURCE_DIR}/app/IMU/IMU.c
 )
 
 # 系统层（SYSTEM）：中断管理与板级系统封装。
@@ -129,6 +130,7 @@ set(COMMON_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/app/My_Usart
     ${CMAKE_SOURCE_DIR}/app/PID
     ${CMAKE_SOURCE_DIR}/app/Filter
+    ${CMAKE_SOURCE_DIR}/app/IMU
     ${CMAKE_SOURCE_DIR}/API
     ${CMAKE_SOURCE_DIR}/API/inc
     ${CMAKE_SOURCE_DIR}/API/API_I2C

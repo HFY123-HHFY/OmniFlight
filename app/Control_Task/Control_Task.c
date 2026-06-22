@@ -7,6 +7,7 @@
 #include "Dshot.h"
 #include "Motor.h"
 #include "MPU6050.h"
+#include "IMU.h"
 
 /* =========================================================================
  * 任务标志位
@@ -29,9 +30,7 @@ volatile uint8_t print_task_flag = 0U;   /* 10Hz  串口打印          */
  *
  * 职责：飞控心脏节拍
  *   - PID 控制 + 电机输出：500Hz（每 2ms）
- *
- * 注意：此 ISR 只做计数 + 置标志，不执行 PID 运算。
- *       PID 运算在 main loop 中根据标志位触发。
+ * 
  * ========================================================================= */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
@@ -47,6 +46,8 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 	if (pid_2ms_tick >= 2U)
 	{
 		pid_2ms_tick = 0U;
+		/* IMU 偏航融合：陀螺积分 (500Hz) */
+		IMU_Yaw_IntegrateGyro((float)gyroz / GYRO_SENS_2000DPS, 0.002f);
 		// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
 	}
 }
