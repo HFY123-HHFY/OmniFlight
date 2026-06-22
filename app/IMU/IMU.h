@@ -44,6 +44,8 @@ float IMU_Get_GyroBias(void);
 /* 返回零偏初始化是否完成（完成后才能用 IMU_Get_Yaw）。 */
 uint8_t IMU_IsReady(void);
 
+extern float IMU_Yaw;   /* 外部可见的融合偏航角，主循环更新 */
+
 #ifdef __cplusplus
 }
 #endif

@@ -55,8 +55,8 @@ uint8_t GyroBias_Calibrate(uint16_t samples);
 /* 查询校准是否完成。 */
 uint8_t GyroBias_IsReady(void);
 
-/* 手动设置陀螺零偏（单位：原始 LSB）。 */
-void Set_Gyro_Bias(float bias_x, float bias_y, float bias_z);
+/* 手动设置陀螺零偏（仅 X/Y 轴，单位：原始 LSB）。Z 轴零偏由 IMU 在线估计。 */
+void Set_Gyro_Bias(float bias_x, float bias_y);
 
 /*
  * Pitch/Roll 串级 PID 控制。

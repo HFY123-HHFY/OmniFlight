@@ -3,9 +3,26 @@
 #include <math.h>
 
 #include "API_I2C.h"
+#include "Delay.h"
+#include "LED.h"
 
-/* 最新一次计算得到的海拔高度（单位：m）。 */
+/* 最新一次计算得到的海拔高度（m，相对地面，0 为钳位下限）。 */
 float alt = 0.0f;
+/* 最新测量的大气气压（hPa），供串口打印/遥测。 */
+float bmp_press = 0.0f;
+/* 最新测量的芯片温度（℃），仅供串口观察，不参与高度计算（自发热偏高 ~10℃）。 */
+float bmp_temp  = 0.0f;
+
+/*
+ * 地面基准（由 BMP280_ZeroAltitude() 写入）：
+ *   ground_pressure    — 地面平均气压（hPa），高度公式的 P0
+ *   ground_temperature — 地面平均温度（℃），高度公式的 T
+ *
+ * 初始值仅为 fallback，校准后即被实际采集值覆盖。
+ * 高度公式用地面温度替代实测温度，避免芯片自发热导致高度漂移。
+ */
+static float ground_pressure    = 1013.25f;
+static float ground_temperature = 25.0f;
 
 /* BMP280 气压/温度过采样与工作模式配置。 */
 #define BMP280_PRESSURE_OSR      (BMP280_OVERSAMP_8X)
@@ -46,17 +63,15 @@ static int32_t bmp280RawTemperature = 0;
 
 /* 读取一帧原始温度/气压数据。 */
 static void bmp280GetPressure(void);
-/* 气压限幅平均滤波。 */
-static void presssureFilter(float *in, float *out);
-/* 气压值转换为海拔高度。 */
-static float bmp280PressureToAltitude(float *pressure);
+/* 气压值转换为海拔高度（相对地面，钳位 >= 0）。 */
+static float bmp280PressureToAltitude(float pressure);
 /* 温度补偿（输出单位：0.01 摄氏度）。 */
 static int32_t bmp280CompensateT(int32_t adcT);
 /* 气压补偿（输出单位：Q24.8 Pa）。 */
 static uint32_t bmp280CompensateP(int32_t adcP);
 
 
-/*  选择I2C1 设置BMP280 I2C速率为400kHZ */
+/* 选择 I2C1，设 BMP280 I2C 速率为 400kHz。 */
 static void BMP280_SelectI2CSpeed(void)
 {
 	API_I2C_SelectBus(BMP280_I2C_BUS);
@@ -177,11 +192,15 @@ void iicDevWrite(uint8_t devaddr, uint8_t addr, uint8_t len, uint8_t *wbuf)
 }
 
 /*
- * BMP280 初始化流程：
- * 1) 读取并校验芯片 ID
- * 2) 读取 24 字节校准参数
- * 3) 配置温度/气压过采样和工作模式
- * 4) 配置内部 IIR 滤波
+ * BMP280 初始化 + 自动地面归零。
+ *
+ * 流程：
+ *   1) 读取并校验芯片 ID
+ *   2) 读取 24 字节校准参数
+ *   3) 配置过采样 + Normal 模式 + IIR 系数 8
+ *   4) 自动执行 5 秒地面归零校准（传感器热稳定 + 采集基准气压/温度）
+ *
+ * 注意：校准期间飞行器必须保持静止！
  */
 bool BMP280Init(void)
 {
@@ -202,9 +221,12 @@ bool BMP280Init(void)
 			   (uint8_t *)&bmp280Cal);
 
 	iicDevWriteByte(BMP280_ADDR, BMP280_CTRL_MEAS_REG, BMP280_MODE);
-	iicDevWriteByte(BMP280_ADDR, BMP280_CONFIG_REG, (uint8_t)((0U << 5) | (4U << 2) | 0U));
+	iicDevWriteByte(BMP280_ADDR, BMP280_CONFIG_REG, (uint8_t)((0U << 5) | (3U << 2) | 0U));
 
 	isInit = true;
+
+	/* 自动执行地面归零校准（5 秒），飞行器必须保持静止！ */
+	BMP280_ZeroAltitude(5000U);
 	return true;
 }
 
@@ -225,10 +247,8 @@ static void bmp280GetPressure(void)
  */
 static int32_t bmp280CompensateT(int32_t adcT)
 {
-	/* 温补公式中间变量。 */
 	int32_t var1;
 	int32_t var2;
-	/* 补偿后的温度输出（0.01 摄氏度）。 */
 	int32_t t;
 
 	var1 = ((((adcT >> 3) - ((int32_t)bmp280Cal.dig_T1 << 1)))*((int32_t)bmp280Cal.dig_T2)) >> 11;
@@ -246,10 +266,8 @@ static int32_t bmp280CompensateT(int32_t adcT)
  */
 static uint32_t bmp280CompensateP(int32_t adcP)
 {
-	/* 气压补偿公式中间变量。 */
 	int64_t var1;
 	int64_t var2;
-	/* 补偿结果（Q24.8）。 */
 	int64_t p;
 
 	var1 = ((int64_t)bmp280Cal.t_fine) - 128000;
@@ -273,77 +291,80 @@ static uint32_t bmp280CompensateP(int32_t adcP)
 	return (uint32_t)p;
 }
 
-#define FILTER_NUM  5U
-#define FILTER_A    0.1f
+/* 标准大气压换算指数 1/5.25588。 */
+#define CONST_PF  0.1902630958f
 
 /*
- * 限幅平均滤波：
- * - FILTER_A: 限幅阈值
- * - FILTER_NUM: 均值窗口长度
+ * 气压 → 相对海拔（m）。
+ *
+ * 公式：h = ((P0 / P)^(1/5.25588) - 1) * (T0 + 273.15) / 0.0065
+ *   P0 = ground_pressure  — 地面气压（5 秒校准采集的平均值）
+ *   T0 = ground_temperature — 地面温度（同上）
+ *
+ * 关键设计：
+ *   - 使用地面校准温度而非实测温度，因为芯片自发热会使实测偏高 ~10℃，
+ *     导致高度公式的线性乘数偏大 ~3.3%，高度随温度漂移。
+ *   - 地面温度在校准时一并采集，误差仅在气温真实变化（如飞到高空），
+ *     对低空定高（< 100m）影响 < 1%。
+ *   - 输出钳位到 >= 0，消除噪声导致的微小负值。
  */
-static void presssureFilter(float *in, float *out)
+static float bmp280PressureToAltitude(float pressure)
 {
-	/* 环形缓冲写入索引。 */
-	static uint8_t i = 0U;
-	/* 气压滤波缓冲区。 */
-	static float filter_buf[FILTER_NUM] = {0.0f};
-	/* 累加求平均。 */
-	float filter_sum = 0.0f;
-	/* 循环计数。 */
-	uint8_t cnt;
-	/* 当前输入与上一次有效值的差值。 */
-	float deta;
+	float h;
 
-	if (filter_buf[i] == 0.0f)
+	if (pressure > 0.0f && ground_pressure > 0.0f)
 	{
-		filter_buf[i] = *in;
-		*out = *in;
-		i++;
-		if (i >= FILTER_NUM)
+		h = ((powf((ground_pressure / pressure), CONST_PF) - 1.0f) * (ground_temperature + 273.15f)) / 0.0065f;
+		if (h < 0.0f)
 		{
-			i = 0U;
+			h = 0.0f;
 		}
+		return h;
 	}
-	else
+
+	return 0.0f;
+}
+
+/*
+ * 地面高度归零：持续采集 duration_ms 毫秒，取气压和温度的平均值
+ * 作为地面基准。
+ *
+ * 调用后 BMP_Data() 返回相对于该基准的高度（地面 ≈ 0m）。
+ *
+ * duration_ms: 校准时长（ms），Init 自动传入 5000（5 秒）
+ *   - 前 1~2 秒传感器热稳定，后续采样为有效基准
+ *   - 每 20ms 采一帧，5 秒共 ~250 帧，平均后噪声 < 0.05m
+ */
+void BMP280_ZeroAltitude(uint32_t duration_ms)
+{
+	float sum_p = 0.0f;
+	float sum_t = 0.0f;
+	float p, t, a;
+	uint32_t elapsed;
+	uint16_t cnt = 0U;
+
+	for (elapsed = 0U; elapsed < duration_ms; elapsed += 20U)
 	{
-		if (i != 0U)
-		{
-			deta = *in - filter_buf[i - 1U];
-		}
-		else
-		{
-			deta = *in - filter_buf[FILTER_NUM - 1U];
-		}
-
-		if (fabsf(deta) < FILTER_A)
-		{
-			filter_buf[i] = *in;
-			i++;
-			if (i >= FILTER_NUM)
-			{
-				i = 0U;
-			}
-		}
-
-		for (cnt = 0U; cnt < FILTER_NUM; cnt++)
-		{
-			filter_sum += filter_buf[cnt];
-		}
-		*out = filter_sum / (float)FILTER_NUM;
+		BMP280GetData(&p, &t, &a);
+		sum_p += p;
+		sum_t += t;
+		cnt++;
+		Delay_ms(20U);   /* 等待传感器产生新数据（Normal 模式周期约 9ms） */
 	}
+
+	ground_pressure    = sum_p / (float)cnt;
+	ground_temperature = sum_t / (float)cnt;
 }
 
 /*
  * 获取 BMP280 实测数据：
- * pressure   -> 气压（hPa）
- * temperature-> 温度（摄氏度）
- * asl        -> 海拔（m）
+ * pressure   → 气压（hPa）
+ * temperature→ 芯片温度（℃，仅供参考，高于环境温度 ~10℃）
+ * asl        → 海拔（m，相对地面归零基准，钳位 >= 0）
  */
 void BMP280GetData(float *pressure, float *temperature, float *asl)
 {
-	/* 温度中间量。 */
 	float t;
-	/* 气压中间量。 */
 	float p;
 
 	bmp280GetPressure();
@@ -351,38 +372,22 @@ void BMP280GetData(float *pressure, float *temperature, float *asl)
 	t = (float)bmp280CompensateT(bmp280RawTemperature) / 100.0f;
 	p = (float)bmp280CompensateP(bmp280RawPressure) / 25600.0f;
 
-	presssureFilter(&p, pressure);
+	*pressure    = p;
 	*temperature = t;
-	*pressure = p;
-	*asl = bmp280PressureToAltitude(pressure);
-	alt = *asl;
+	*asl         = bmp280PressureToAltitude(p);   /* 使用地面温度，非实测温度 */
+
+	/* 更新全局变量，供外部串口打印/遥测 */
+	bmp_press    = p;
+	bmp_temp     = t;
+	alt          = *asl;
 }
 
-/* 标准大气压换算指数 1/5.25588。 */
-#define CONST_PF  0.1902630958f
-/* 固定温度（摄氏度），避免环境温漂导致海拔抖动。 */
-#define FIX_TEMP  25.0f
-
-/* 根据当前气压估算海拔高度（单位：m）。 */
-static float bmp280PressureToAltitude(float *pressure)
-{
-	if (*pressure > 0.0f)
-	{
-		return ((powf((1015.7f / *pressure), CONST_PF) - 1.0f) * (FIX_TEMP + 273.15f)) / 0.0065f;
-	}
-
-	return 0.0f;
-}
-
-/* 仅返回海拔的便捷接口。 */
+/* 仅返回海拔的便捷接口（相对地面，m）。 */
 float BMP_Data(void)
 {
-	/* 当前气压（hPa）。 */
 	float bmp280_press = 0.0f;
-	/* 当前温度（摄氏度）。 */
-	float bmp280_temp = 0.0f;
-	/* 当前海拔（m）。 */
-	float bmp280_asl = 0.0f;
+	float bmp280_temp  = 0.0f;
+	float bmp280_asl   = 0.0f;
 
 	BMP280GetData(&bmp280_press, &bmp280_temp, &bmp280_asl);
 	return bmp280_asl;

@@ -12,12 +12,13 @@ float Target_Roll  = 0.0f;
 float Target_Yaw   = 0.0f;
 
 /* =========================================================================
- * 陀螺零偏（原始 LSB）
+ * 陀螺零偏（原始 LSB），仅 X/Y 轴。
+ * Z 轴零偏由 IMU 互补滤波在线估计，不在此校准。
  * 上电后由 GyroBias_Calibrate() 采样计算，或由 Set_Gyro_Bias() 手动写入。
  * ========================================================================= */
 static float gyro_bias_x = 0.0f;
 static float gyro_bias_y = 0.0f;
-static float gyro_bias_z = 0.0f;
+
 static uint8_t s_gyro_bias_ready = 0U;
 
 /* =========================================================================
@@ -55,15 +56,14 @@ static float GyroRawToDps(short raw, float bias)
 }
 
 /* =========================================================================
- * GyroBias_Calibrate — 独立陀螺零偏校准
+ * GyroBias_Calibrate — 陀螺零偏校准（仅 X/Y 轴）
+ *
+ * Z 轴零偏由 IMU 互补滤波器在线估计，不在此校准。
  *
  * 上电后调用一次，飞行器必须保持静止。
  *
  * samples: 采样点数。DMP 输出 200Hz，1000 点 ≈ 5 秒。
- *          数值越大校准越准，但耗时越长。
- *
  * 返回 1 成功，0 超时失败。
- * 校准期间 LED3 高电平，完成/失败后恢复低电平。
  *
  * 注意：调用前必须已完成 mpu_dmp_init() + Enroll_MPU6050_Register()
  * ========================================================================= */
@@ -71,15 +71,12 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 {
 	float acc_x = 0.0f;
 	float acc_y = 0.0f;
-	float acc_z = 0.0f;
 	uint16_t i;
 
 	if (samples == 0U)
 	{
 		samples = 1000U;
 	}
-
-	LED_Control(LED3, LED_HIGH);
 
 	for (i = 0U; i < samples; i++)
 	{
@@ -93,7 +90,6 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 		{
 			usart_printf(USART1, "Gyro calib TIMEOUT at %u/%u\r\n",
 			             (unsigned int)i, (unsigned int)samples);
-			LED_Control(LED3, LED_LOW);
 			return 0U;
 		}
 
@@ -103,28 +99,23 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 
 		acc_x += (float)gyrox;
 		acc_y += (float)gyroy;
-		acc_z += (float)gyroz;
 	}
 
 	gyro_bias_x = acc_x / (float)samples;
 	gyro_bias_y = acc_y / (float)samples;
-	gyro_bias_z = acc_z / (float)samples;
 	s_gyro_bias_ready = 1U;
-
-	LED_Control(LED3, LED_LOW);
 
 	/*
 	 * 打印校准结果 + 验证数据。
 	 * 确认校准后静止角速度接近 0 即可注释掉，以后调试再解除。
 	 */
 	MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
-	usart_printf(USART1,
-	             "Gyro calib: bias(%.2f,%.2f,%.2f)  dps(%.2f,%.2f,%.2f) [%u samples]\r\n",
-	             gyro_bias_x, gyro_bias_y, gyro_bias_z,
-	             GyroRawToDps(gyrox, gyro_bias_x),
-	             GyroRawToDps(gyroy, gyro_bias_y),
-	             GyroRawToDps(gyroz, gyro_bias_z),
-	             (unsigned int)samples);
+	// usart_printf(USART1,
+	//              "Gyro calib: bias(%.2f,%.2f)  dps(%.2f,%.2f) [%u samples]\r\n",
+	//              (double)gyro_bias_x, (double)gyro_bias_y,
+	//              (double)GyroRawToDps(gyrox, gyro_bias_x),
+	//              (double)GyroRawToDps(gyroy, gyro_bias_y),
+	//              (unsigned int)samples);
 
 	return 1U;
 }
@@ -135,12 +126,11 @@ uint8_t GyroBias_IsReady(void)
 	return s_gyro_bias_ready;
 }
 
-/* 手动设置陀螺零偏 */
-void Set_Gyro_Bias(float bias_x, float bias_y, float bias_z)
+/* 手动设置陀螺零偏（仅 X/Y 轴，单位：原始 LSB）。Z 轴零偏由 IMU 在线估计。 */
+void Set_Gyro_Bias(float bias_x, float bias_y)
 {
 	gyro_bias_x = bias_x;
 	gyro_bias_y = bias_y;
-	gyro_bias_z = bias_z;
 	s_gyro_bias_ready = 1U;
 }
 

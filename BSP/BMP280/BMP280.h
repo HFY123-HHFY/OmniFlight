@@ -44,8 +44,12 @@ extern "C" {
 #define BMP280_OVERSAMP_8X                      (0x04U)
 #define BMP280_OVERSAMP_16X                     (0x05U)
 
-/* 对外提供：最近一次计算出的海拔高度（m）。 */
+/* 对外提供：相对高度（m，钳位 >= 0）。 */
 extern float alt;
+/* 最新测量的大气气压（hPa）。 */
+extern float bmp_press;
+/* 芯片温度（℃，仅供参考，自发热偏高约 10℃）。 */
+extern float bmp_temp;
 
 /* 读取 1 个寄存器。 */
 uint8_t iicDevReadByte(uint8_t devaddr, uint8_t addr);
@@ -56,11 +60,13 @@ void iicDevRead(uint8_t devaddr, uint8_t addr, uint8_t len, uint8_t *rbuf);
 /* 连续写入多个寄存器。 */
 void iicDevWrite(uint8_t devaddr, uint8_t addr, uint8_t len, uint8_t *wbuf);
 
-/* 初始化 BMP280，成功返回 true。 */
+/* 初始化 + 自动地面归零（5 秒校准，飞行器须静止）。成功返回 true。 */
 bool BMP280Init(void);
 /* 获取气压/温度/海拔（hPa / 摄氏度 / m）。 */
 void BMP280GetData(float *pressure, float *temperature, float *asl);
-/* 仅返回海拔的便捷接口。 */
+/* 地面归零：持续采集 duration_ms 毫秒取平均作为地面基准（起飞前调用，建议 5000）。 */
+void BMP280_ZeroAltitude(uint32_t duration_ms);
+/* 仅返回海拔的便捷接口（m，相对地面）。 */
 float BMP_Data(void);
 
 #ifdef __cplusplus
