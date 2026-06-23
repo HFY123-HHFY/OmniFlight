@@ -102,11 +102,10 @@ int main(void)
 	/* 所有外设初始化完成-蜂鸣器初始化 */
 	Buzzer_Init();	
 
-	/*
+	/*      
 	 * 串级PID参数（基于 dt=0.002s，500Hz）
 	 * 调参顺序：先 KP → 再 KD → 最后 KI
 	 */
-	/* current tested params */
 	Set_PID(&pid_pitch,      4.0f, 0.3f, 0.0f);
 	Set_PID(&pid_rate_pitch, 1.8f, 0.0f, 0.015f);
 

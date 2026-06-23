@@ -28,12 +28,13 @@ extern float Target_Yaw;
 /* 外环 PID：角度。 */
 extern PID_TypeDef pid_pitch;
 extern PID_TypeDef pid_roll;
-extern PID_TypeDef pid_yaw;
 
 /* 内环 PID：角速度。 */
 extern PID_TypeDef pid_rate_pitch;
 extern PID_TypeDef pid_rate_roll;
-extern PID_TypeDef pid_rate_yaw;
+
+/* 高度环 */
+extern PID_TypeDef pid_alt;
 
 /*
  * 控制初始化：

@@ -32,11 +32,12 @@ static uint8_t s_gyro_bias_ready = 0U;
  * ========================================================================= */
 PID_TypeDef pid_pitch;
 PID_TypeDef pid_roll;
-PID_TypeDef pid_yaw;
 
 PID_TypeDef pid_rate_pitch;
 PID_TypeDef pid_rate_roll;
-PID_TypeDef pid_rate_yaw;
+
+/* 高度 alt 对象*/
+PID_TypeDef pid_alt;
 
 /* Pitch/Roll 串级对象 */
 static PID_Cascade_t cascade_pitch;

@@ -4,6 +4,8 @@
 #include "My_Usart/My_Usart.h"
 #include "gpio.h"
 #include "Motor.h"
+#include "IMU.h"
+#include "BMP280.h"
 
 /*
  * NRF24L01 模块私有状态：
@@ -441,21 +443,24 @@ void NRF24L01_Data(void)
 		{
 			NRF24L01_TxPacket[0] = 0x01; // 回传数据包ID
 			// 回传基础油门 speed_temp (uint16_t, 低字节在前)
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 1, speed_temp);
+			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 1, speed_temp);  // 占用1，2 字节
 			NRF24L01_TxPacket[3] = 0U;
 
 			//4~23 字节放姿态数据
 			*(float *)&NRF24L01_TxPacket[4] = Pitch; // 占用4，5，6，7
 			*(float *)&NRF24L01_TxPacket[8] = Roll; // 占用8，9，10，11
-			*(float *)&NRF24L01_TxPacket[12] = Yaw; // 占用12，13，14，15
-			*(float *)&NRF24L01_TxPacket[16] = pid_rate_pitch.output; // 占用16，17，18，19
-			*(float *)&NRF24L01_TxPacket[20] = pid_rate_roll.output; // 占用20，21，22，23
+			*(float *)&NRF24L01_TxPacket[12] = IMU_Yaw; // 占用12，13，14，15
+			*(float *)&NRF24L01_TxPacket[16] = alt; // 占用16,17,18,19
+
+			*(float *)&NRF24L01_TxPacket[20] = pid_rate_pitch.output; // 占用20，21，22，23
+			*(float *)&NRF24L01_TxPacket[24] = pid_rate_roll.output; // 占用24，25，26，27
+			*(float *)&NRF24L01_TxPacket[28] = pid_alt.output; // 占用28,29,30,31
 
 			//24~31 字节放最终加载到4个电机上的油门值
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 24, Motor_Output[0]);
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 26, Motor_Output[1]);
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 28, Motor_Output[2]);
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 30, Motor_Output[3]);
+			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 24, Motor_Output[0]);  // 占用24，25 字节
+			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 26, Motor_Output[1]);  // 占用26，27 字节
+			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 28, Motor_Output[2]);  // 占用28，29 字节
+			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 30, Motor_Output[3]);  // 占用30，31 字节
 			SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
 		}
 		//得到遥控器的键值
