@@ -22,7 +22,7 @@ float bmp_temp  = 0.0f;
  * 高度公式用地面温度替代实测温度，避免芯片自发热导致高度漂移。
  */
 static float ground_pressure    = 1013.25f;
-static float ground_temperature = 25.0f;
+static float ground_temperature = 27.0f;
 
 /* BMP280 气压/温度过采样与工作模式配置。 */
 #define BMP280_PRESSURE_OSR      (BMP280_OVERSAMP_8X)

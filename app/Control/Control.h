@@ -58,6 +58,9 @@ uint8_t GyroBias_IsReady(void);
 /* 手动设置陀螺零偏（仅 X/Y 轴，单位：原始 LSB）。Z 轴零偏由 IMU 在线估计。 */
 void Set_Gyro_Bias(float bias_x, float bias_y);
 
+/* 解锁时重置 PID 内部状态 + 低通滤波器，防止地面噪声污染导致解锁瞬态。 */
+void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps);
+
 /*
  * Pitch/Roll 串级 PID 控制。
  * 校准已独立完成，此函数不再包含校准逻辑。

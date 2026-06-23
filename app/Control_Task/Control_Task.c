@@ -48,7 +48,14 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 		pid_2ms_tick = 0U;
 		/* IMU 偏航融合：陀螺积分 (500Hz) */
 		IMU_Yaw_IntegrateGyro((float)gyroz / GYRO_SENS_2000DPS, 0.002f);
-		// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
+		if (Key == 1)
+		{
+			PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
+		}
+		else
+		{
+			Motor_Test();  /* 未解锁时仍走电机状态机（处理掉电缓降） */
+		}
 	}
 }
 

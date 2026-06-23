@@ -3,6 +3,7 @@
 #include "LED.h"
 #include "MPU6050.h"                    /* MPU_Get_Gyroscope */
 #include "My_Usart/My_Usart.h"          /* usart_printf */
+#include "KEY.h"
 
 /* =========================================================================
  * 目标姿态
@@ -164,6 +165,12 @@ void PID_Contorl_Init(void)
 	PID_Init_WithLimit(&pid_rate_pitch, 100.0f, MOTOR_MIX_LIMIT);
 	PID_Init_WithLimit(&pid_rate_roll,  100.0f, MOTOR_MIX_LIMIT);
 
+	/* ---- 积分分离阈值 ---- */
+	PID_SetIntegralSeparation(&pid_pitch, 15.0f);
+	PID_SetIntegralSeparation(&pid_roll,  15.0f);
+	PID_SetIntegralSeparation(&pid_rate_pitch, 100.0f);
+	PID_SetIntegralSeparation(&pid_rate_roll,  100.0f);
+
 	/* ---- 串级：外环输出 → 内环目标 ---- */
 	PID_Cascade_Init(&cascade_pitch, &pid_pitch, &pid_rate_pitch);
 	PID_Cascade_Init(&cascade_roll,  &pid_roll,  &pid_rate_roll);
@@ -171,6 +178,21 @@ void PID_Contorl_Init(void)
 	/* ---- 陀螺角速度低通滤波器 ---- */
 	LPF1_Init(&gyro_pitch_lpf, 0.45f, 0.0f);
 	LPF1_Init(&gyro_roll_lpf,  0.45f, 0.0f);
+}
+
+/* =========================================================================
+ * Control_Arm_Reset
+ *
+ * 解锁时重置 PID内部状态+低通滤波器，防止地面噪声污染。
+ * ========================================================================= */
+void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps)
+{
+	PID_Reset(&pid_pitch);
+	PID_Reset(&pid_roll);
+	PID_Reset(&pid_rate_pitch);
+	PID_Reset(&pid_rate_roll);
+	LPF1_Init(&gyro_pitch_lpf, 0.45f, current_gyro_pitch_dps);
+	LPF1_Init(&gyro_roll_lpf,  0.45f, current_gyro_roll_dps);
 }
 
 /* =========================================================================
@@ -186,6 +208,16 @@ void PID_Contorl_Init(void)
  * ========================================================================= */
 void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll)
 {
+	static uint8_t last_key = 0U;
+
+	/* 解锁边沿检测：Key 0->1 时重置 PID状态 */
+	if (Key == 1 && last_key != 1)
+	{
+		Control_Arm_Reset(GyroRawToDps(gyroy, gyro_bias_y),
+		                  GyroRawToDps(gyrox, gyro_bias_x));
+	}
+	last_key = Key;
+
 	float pitch_rate_out = 0.0f;
 	float roll_rate_out  = 0.0f;
 	float gyro_pitch_dps = 0.0f;

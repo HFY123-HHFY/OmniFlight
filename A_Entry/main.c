@@ -84,7 +84,11 @@ int main(void)
 	/* 飞行器必须保持静止！LED3 亮=校准中，灭=完成 */
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
-	GyroBias_Calibrate(1000U);
+	if (GyroBias_Calibrate(1000U) == 0U)
+	{
+		/* calib timeout - halt */
+		while (1) {}
+	}
 	/* 初始化QMC5883P（5秒校准模式自动触发） */
 	QMC_Init();		
 	/* 初始化BMP280（5秒自动地面归零校准） */
@@ -102,11 +106,12 @@ int main(void)
 	 * 串级PID参数（基于 dt=0.002s，500Hz）
 	 * 调参顺序：先 KP → 再 KD → 最后 KI
 	 */
-	Set_PID(&pid_pitch,      2.0f, 15.0f, 0.0f);   // 外环 Pitch: KP=2.0, KI=15.0
-	Set_PID(&pid_rate_pitch, 1.5f,  5.0f, 0.008f); // 内环 Pitch: KP=1.5, KI=5.0, KD=0.008
+	/* current tested params */
+	Set_PID(&pid_pitch,      4.0f, 0.3f, 0.0f);
+	Set_PID(&pid_rate_pitch, 1.8f, 0.0f, 0.015f);
 
-	Set_PID(&pid_roll,       2.0f, 15.0f, 0.0f);   // 外环 Roll
-	Set_PID(&pid_rate_roll,  1.5f,  5.0f, 0.008f); // 内环 Roll
+	Set_PID(&pid_roll,       4.0f, 0.3f, 0.0f);
+	Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
 
 /* ── 调试开关：起飞前设 0，关闭所有 printf ── */
 #define DEBUG_PRINT_ENABLE  1U
