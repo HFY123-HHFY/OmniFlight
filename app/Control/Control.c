@@ -69,10 +69,11 @@ static float GyroRawToDps(short raw, float bias)
  *
  * 注意：调用前必须已完成 mpu_dmp_init() + Enroll_MPU6050_Register()
  * ========================================================================= */
-uint8_t GyroBias_Calibrate(uint16_t samples)
+uint8_t GyroBias_Calibrate(uint16_t samples, float *gravity_ref_out)
 {
-	float acc_x = 0.0f;
-	float acc_y = 0.0f;
+	float gyro_sum_x = 0.0f;
+	float gyro_sum_y = 0.0f;
+	float acc_z_sum  = 0.0f;
 	uint16_t i;
 
 	if (samples == 0U)
@@ -98,14 +99,21 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 		mpu_flag = 0U;
 		mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
 		MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
+		MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
 
-		acc_x += (float)gyrox;
-		acc_y += (float)gyroy;
+		gyro_sum_x += (float)gyrox;
+		gyro_sum_y += (float)gyroy;
+		acc_z_sum  += (float)aacz;
 	}
 
-	gyro_bias_x = acc_x / (float)samples;
-	gyro_bias_y = acc_y / (float)samples;
+	gyro_bias_x = gyro_sum_x / (float)samples;
+	gyro_bias_y = gyro_sum_y / (float)samples;
 	s_gyro_bias_ready = 1U;
+
+	if (gravity_ref_out != 0)
+	{
+		*gravity_ref_out = acc_z_sum / (float)samples;
+	}
 
 	/*
 	 * 打印校准结果 + 验证数据。

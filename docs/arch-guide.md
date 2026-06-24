@@ -32,6 +32,7 @@
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
 │  IMU/           偏航角互补滤波融合       │
+│  Altitude/      高度互补滤波融合         │
 │  My_Usart/      串口管理 + printf       │
 └────────────────────────────────────────┘
               ↓
@@ -122,10 +123,10 @@
 │ 1000ms → Timer_Bsp_t++   (1Hz 时间戳)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │ 主循环 — 消费任务标志                                             │
-│   mpu_flag (200Hz)    → DMP Pitch/Roll + gyrox/gyroy/gyroz       │
+│   mpu_flag (200Hz)    → DMP Pitch/Roll + gyrox/gyroy/gyroz + aacz │
 │   nrf_task_flag       → NRF24L01_Data() 遥控+遥测                │
 │   qmc_task_flag       → Angle_XY=QMC_Data() → IMU_Yaw_CorrectMag │
-│   bmp_task_flag       → alt=BMP_Data()                           │
+│   bmp_task_flag       → alt=BMP_Data() → Altitude_Update(aacz,alt,0.05s) │
 │   print_task_flag     → usart_printf 传感器数据                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -156,18 +157,34 @@ bias -= Ki * (mag - yaw)           ← 零偏在线补偿
 - 输出：`IMU_Yaw` 全局变量 (0~360°)，替代 DMP Yaw
 - `IMU_Init()` 必须在 `API_TIM_Init(TIM1)` 之前调用
 
-### 5.4 传感器校准
+### 5.4 高度融合 (Altitude)
+
+BMP280 气压计噪声 ±1m 且响应慢，加速度计 Z 轴积分短期精确但长期发散。互补滤波融合：
+
+```
+pos += vel * dt                         ← 速度积分 (20Hz)
+vel += (aacz - gravity_ref) * G_SCALE * dt  ← 加速度积分
+pos += Kp * (baro_alt - pos)            ← 气压计 P 校正
+vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
+```
+
+- Kp=0.4, Ki=0.2, 调用频率 20Hz（bmp_task_flag）
+- `gravity_ref` 与陀螺零偏同步采集（同一次 5s 静止），无额外等待
+- 输出：`Alt_Fused` — 融合高度 (m)，钳位 >= 0
+- `Altitude_Init()` 在 `GyroBias_Calibrate` 之后调用，接收重力参考值
+
+### 5.5 传感器校准
 
 | 传感器 | 校准方式 | 耗时 | 说明 |
 |--------|----------|:---:|------|
-| MPU6050 Gyro X/Y | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U)` |
+| MPU6050 Gyro X/Y + 重力参考 | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U, &gravity_ref)` 同步采集 |
 | MPU6050 Gyro Z | IMU 互补滤波在线 PI | ~5s | TIM1 ISR 自动完成 |
-| QMC5883P | 硬铁 offset + 软铁 scale | 30s | 自动采集 min/max，参数写头文件 |
-| BMP280 | 地面气压归零 | 5s | `BMP280Init` 内部自动执行 |
+| QMC5883P | 硬铁 offset + 软铁 scale (预存参数) | 瞬间 | `QMC_CAL_ENABLE=0` 使用头文件预存值 |
+| BMP280 | 地面气压归零 + EMA 跟踪 | 5s | `BMP280Init` 内部自动执行 |
 
-总启动时间：约 15 秒（陀螺 5s + QMC 5s + BMP 5s 可并行优化）
+总启动时间：约 10 秒（陀螺+重力 5s + BMP 5s）
 
-### 5.5 DShot300 油门协议
+### 5.6 DShot300 油门协议
 
 - TIM1 配置为 300kHz PWM 基波（ARR=560, PSC=1）
 - DMA2 Stream5 burst 模式，每次 TIM1 溢出自动更新 CCR1~CCR4
@@ -175,20 +192,20 @@ bias -= Ki * (mag - yaw)           ← 零偏在线补偿
 - 油门范围：48~2047（0 停转，1~47 为保留命令区）
 - **重要**：电调需要从最低油门（48）逐步递增，不可直接跳到大油门值
 
-### 5.6 中断回调架构
+### 5.7 中断回调架构
 
 - `Control_Task1_Callback` → TIM1 1ms → pid_2ms_tick (2ms/500Hz) → IMU 积分 + PID
 - `Control_Task2_Callback` → TIM2 1ms → 所有任务标志调度
 - `Control_Task_USART_Callback` → USART1/3 → TX 队列排空 + RX 接收
 
-### 5.7 任务标志位一览
+### 5.8 任务标志位一览
 
 | 标志 | 频率 | ISR 源 | 主循环消费 |
 |------|:---:|--------|------------|
 | `mpu_flag` | 200Hz | MPU6050 EXTI | DMP + Gyro 读取 |
 | `nrf_task_flag` | 100Hz | TIM2 | NRF24L01_Data() |
 | `qmc_task_flag` | 50Hz | TIM2 | QMC_Data() → IMU_Yaw_CorrectMag() |
-| `bmp_task_flag` | 20Hz | TIM2 | BMP_Data() |
+| `bmp_task_flag` | 20Hz | TIM2 | BMP_Data() → Altitude_Update() |
 | `print_task_flag` | 10Hz | TIM2 | usart_printf |
 
 ---
@@ -257,6 +274,7 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 | BMP280 | API_I2C | 气压高度（含地面归零校准） |
 | NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
 | IMU | MPU6050 + QMC5883P | 偏航角互补滤波融合 |
+| Altitude | MPU6050 + BMP280 | 高度互补滤波融合 (aacz + 气压计) |
 | Dshot | Core f407_pwm + f407_dma | DShot300 油门 |
 | Motor | Dshot + Control | 电机混控反饱和 |
 | Buzzer | API_PWM | 无源蜂鸣器 |
@@ -271,8 +289,9 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 4. **printf 异步 TX**：必须注册 USART 中断回调，否则 TX 队列不会排空
 5. **F407 以外平台**：f407_dma、Dshot、Motor、Buzzer 仅在 F407 编译
 6. **IMU_Init 顺序**：必须在 `API_TIM_Init(TIM1)` 之前调用，否则 ISR 访问未初始化状态
-7. **上电静止**：飞行器需静止 ~15s（陀螺 5s + QMC 5s + BMP 5s）完成所有传感器校准
+7. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
 8. **I2C 总线**：所有 I2C 读写仅在主循环，ISR 不触碰 I2C（硬件 I2C 不可重入）
+9. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁。
 
 ---
 
@@ -285,6 +304,7 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 5. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
 6. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 中断回调 + 任务调度
 7. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
-8. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
-9. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级
-10. [CMakeLists.txt](CMakeLists.txt) — 构建入口
+8. [app/Altitude/Altitude.c](app/Altitude/Altitude.c) — 高度互补滤波融合
+9. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
+10. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级
+11. [CMakeLists.txt](CMakeLists.txt) — 构建入口

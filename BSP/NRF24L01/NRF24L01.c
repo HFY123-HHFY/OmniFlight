@@ -5,7 +5,7 @@
 #include "gpio.h"
 #include "Motor.h"
 #include "IMU.h"
-#include "BMP280.h"
+#include "Altitude.h"
 
 /*
  * NRF24L01 模块私有状态：
@@ -450,7 +450,7 @@ void NRF24L01_Data(void)
 			*(float *)&NRF24L01_TxPacket[4] = Pitch; // 占用4，5，6，7
 			*(float *)&NRF24L01_TxPacket[8] = Roll; // 占用8，9，10，11
 			*(float *)&NRF24L01_TxPacket[12] = IMU_Yaw; // 占用12，13，14，15
-			*(float *)&NRF24L01_TxPacket[16] = alt; // 占用16,17,18,19
+			*(float *)&NRF24L01_TxPacket[16] = Alt_Fused; // 占用16,17,18,19
 
 			*(float *)&NRF24L01_TxPacket[20] = pid_rate_pitch.output; // 占用20，21，22，23
 			*(float *)&NRF24L01_TxPacket[24] = pid_rate_roll.output; // 占用24，25，26，27

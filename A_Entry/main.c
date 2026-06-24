@@ -1,7 +1,7 @@
 /*
 * OmniFlight - 四轴飞控 
 * 初始化相关外设并校准各个传感器：
-* 陀螺仪、磁力计、气压计各五秒，共计飞控需静止15S左右-蓝灯亮
+* 陀螺仪、磁力计、气压计各五秒，共计飞控需静止10S左右-蓝灯亮
 
 * 校准完毕蓝灯灭
 * 全部外设初始化完-蜂鸣器鸣笛蓝灯灭
@@ -40,6 +40,7 @@
 #include "NRF24L01.h"
 #include "Buzzer.h"
 #include "IMU.h"
+#include "Altitude.h"
 
 int main(void)
 {
@@ -81,16 +82,19 @@ int main(void)
 	usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 
-	/* 飞行器必须保持静止！LED3 亮=校准中，灭=完成 */
+	/* 校准过程中飞行器必须保持静止！LED3 亮 = 校准所以传感器中，灭 = 所以传感器校准完成 */
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
-	if (GyroBias_Calibrate(1000U) == 0U)
+	float gravity_ref = 0.0f;
+	if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
 	{
 		/* calib timeout - halt */
 		while (1) {}
 	}
-	/* 初始化QMC5883P（5秒校准模式自动触发） */
+	/* 初始化QMC5883P */
 	QMC_Init();
+	/* 高度融合初始化（5秒重力参考采集） */
+	Altitude_Init(gravity_ref);
 	/* 初始化BMP280（5秒自动地面归零校准） */
 	BMP280Init();
 	/* 初始化NRF24L01 */	
@@ -113,7 +117,7 @@ int main(void)
 	Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
 
 /* ── 调试开关：起飞前设 0，关闭所有 printf ── */
-#define DEBUG_PRINT_ENABLE  1U
+#define DEBUG_PRINT_ENABLE  0U
 
 	while (1)
 	{
@@ -151,9 +155,10 @@ int main(void)
 		{
 			bmp_task_flag = 0U;
 			alt = BMP_Data();
+			Altitude_Update(aacz, alt, 0.05f);
 		}
 
-		/* 
+		/*
 		*串口打印 (10Hz) */
 		#if (DEBUG_PRINT_ENABLE == 1U)
 			if (print_task_flag != 0U)
@@ -162,7 +167,7 @@ int main(void)
 				/* 磁力计数据测试 */
 				// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
 				/* 气压计数据测试 */
-				usart_printf(USART3, "alt: %.1f aacz: %hd\r\n", alt, aacz);
+				usart_printf(USART3, "alt: %.1f aacz: %hd F: %.1f\r\n", alt, aacz, Alt_Fused);
 				/* 陀螺仪数据测试 */
 				// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 				/* 3个传感器数据 */

@@ -46,12 +46,11 @@ void PID_Contorl_Init(void);
 
 /*
  * 陀螺零偏校准（上电后调用一次，飞行器必须静止）。
- * samples: 采样点数（建议 1000，约 5s）
+ * samples        : 采样点数（建议 1000，约 5s）
+ * gravity_ref_out: 输出重力参考值 (aacz 均值)，可为 NULL
  * 返回 1 成功，0 超时失败。
- *
- * 校准期间 LED3 高电平，完成/失败后恢复低电平。
  */
-uint8_t GyroBias_Calibrate(uint16_t samples);
+uint8_t GyroBias_Calibrate(uint16_t samples, float *gravity_ref_out);
 
 /* 查询校准是否完成。 */
 uint8_t GyroBias_IsReady(void);
