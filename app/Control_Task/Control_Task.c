@@ -50,7 +50,7 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 		IMU_Yaw_IntegrateGyro((float)gyroz / GYRO_SENS_2000DPS, 0.002f);
 		if (Key == 1)
 		{
-			PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
+			// PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
 		}
 		else
 		{

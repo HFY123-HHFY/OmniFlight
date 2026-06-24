@@ -5,6 +5,12 @@
 #include "API_I2C.h"
 #include "Delay.h"
 #include "LED.h"
+#include "KEY.h"
+
+/* 芯片自发热温升 (℃) */
+#define BMP280_SELF_HEATING_OFFSET 8.0f
+/* 地面气压 EMA 跟踪系数 */
+#define BMP280_GND_EMA_ALPHA      0.02f
 
 /* 最新一次计算得到的海拔高度（m，相对地面，0 为钳位下限）。 */
 float alt = 0.0f;
@@ -64,7 +70,7 @@ static int32_t bmp280RawTemperature = 0;
 /* 读取一帧原始温度/气压数据。 */
 static void bmp280GetPressure(void);
 /* 气压值转换为海拔高度（相对地面，钳位 >= 0）。 */
-static float bmp280PressureToAltitude(float pressure);
+static float bmp280PressureToAltitude(float pressure, float temperature);
 /* 温度补偿（输出单位：0.01 摄氏度）。 */
 static int32_t bmp280CompensateT(int32_t adcT);
 /* 气压补偿（输出单位：Q24.8 Pa）。 */
@@ -297,28 +303,27 @@ static uint32_t bmp280CompensateP(int32_t adcP)
 /*
  * 气压 → 相对海拔（m）。
  *
- * 公式：h = ((P0 / P)^(1/5.25588) - 1) * (T0 + 273.15) / 0.0065
- *   P0 = ground_pressure  — 地面气压（5 秒校准采集的平均值）
- *   T0 = ground_temperature — 地面温度（同上）
+ * 公式：h = ((P0 / P)^(1/5.25588) - 1) * (T + 273.15) / 0.0065
+ *   P0 = ground_pressure  — 地面气压（未解锁时 EMA 跟踪）
+ *   T  = 实测温度 - 自发热偏置 (8℃)
  *
  * 关键设计：
- *   - 使用地面校准温度而非实测温度，因为芯片自发热会使实测偏高 ~10℃，
- *     导致高度公式的线性乘数偏大 ~3.3%，高度随温度漂移。
- *   - 地面温度在校准时一并采集，误差仅在气温真实变化（如飞到高空），
- *     对低空定高（< 100m）影响 < 1%。
- *   - 输出钳位到 >= 0，消除噪声导致的微小负值。
+ *   - 使用实测温度减去自发热偏置，而非固定值。
+ *   - 未解锁时 ground_pressure 持续 EMA 跟踪，消除芯片热漂移导致的高度不回零。
+ *   - 解锁后 ground_pressure 冻结，保证飞行中高度参照稳定。
+ *   - 输出钳位到 >= 0。
  */
-static float bmp280PressureToAltitude(float pressure)
+static float bmp280PressureToAltitude(float pressure, float temperature)
 {
 	float h;
+	float t_ambient;
 
 	if (pressure > 0.0f && ground_pressure > 0.0f)
 	{
-		h = ((powf((ground_pressure / pressure), CONST_PF) - 1.0f) * (ground_temperature + 273.15f)) / 0.0065f;
-		if (h < 0.0f)
-		{
-			h = 0.0f;
-		}
+		t_ambient = temperature - BMP280_SELF_HEATING_OFFSET;
+		if (t_ambient < -40.0f) { t_ambient = -40.0f; }
+		h = ((powf((ground_pressure / pressure), CONST_PF) - 1.0f) * (t_ambient + 273.15f)) / 0.0065f;
+		if (h < 0.0f) { h = 0.0f; }
 		return h;
 	}
 
@@ -374,7 +379,7 @@ void BMP280GetData(float *pressure, float *temperature, float *asl)
 
 	*pressure    = p;
 	*temperature = t;
-	*asl         = bmp280PressureToAltitude(p);   /* 使用地面温度，非实测温度 */
+	*asl         = bmp280PressureToAltitude(p, t);
 
 	/* 更新全局变量，供外部串口打印/遥测 */
 	bmp_press    = p;
@@ -382,13 +387,55 @@ void BMP280GetData(float *pressure, float *temperature, float *asl)
 	alt          = *asl;
 }
 
-/* 仅返回海拔的便捷接口（相对地面，m）。 */
+/*
+ * 返回相对地面高度 (m)。
+ *
+ * 地面气压跟踪策略：
+ *   未解锁 (Key!=1): 慢速 EMA 跟踪气压变化，补偿芯片热漂移
+ *   解锁 (Key==1):  冻结 ground_pressure，保证飞行中高度参照稳定
+ *   锁定瞬间: 快速重采地面气压 (2s)， alt 立即归零
+ *
+ * 注意：飞完降落后必须先锁定 (Key!=1)，等 2s alt 归零再重新解锁，
+ * 否则 ground_pressure 停在旧值，放回原位 alt 不会归零。
+ */
 float BMP_Data(void)
 {
+	static uint8_t  prev_key       = 0U;
+	static uint8_t  disarm_samples = 0U;
+	static float    disarm_press_sum = 0.0f;
 	float bmp280_press = 0.0f;
 	float bmp280_temp  = 0.0f;
 	float bmp280_asl   = 0.0f;
 
 	BMP280GetData(&bmp280_press, &bmp280_temp, &bmp280_asl);
+
+	/* Key 1->0 边沿：开始快速归零 (2s 采 40 帧) */
+	if (prev_key == 1 && Key != 1)
+	{
+		disarm_samples = 0U;
+		disarm_press_sum = 0.0f;
+	}
+	prev_key = Key;
+
+	if (Key != 1)
+	{
+		if (disarm_samples < 40U)
+		{
+			/* 前 2 秒快速平均 */
+			disarm_press_sum += bmp280_press;
+			disarm_samples++;
+			if (disarm_samples >= 40U)
+			{
+				ground_pressure = disarm_press_sum / 40.0f;
+			}
+		}
+		else
+		{
+			/* 归零完成后恢复慢速 EMA 跟踪 */
+			ground_pressure += BMP280_GND_EMA_ALPHA * (bmp280_press - ground_pressure);
+		}
+	}
+	/* Key==1: 冻结 ground_pressure，不更新 */
+
 	return bmp280_asl;
 }

@@ -90,7 +90,7 @@ int main(void)
 		while (1) {}
 	}
 	/* 初始化QMC5883P（5秒校准模式自动触发） */
-	QMC_Init();		
+	QMC_Init();
 	/* 初始化BMP280（5秒自动地面归零校准） */
 	BMP280Init();
 	/* 初始化NRF24L01 */	
@@ -124,7 +124,7 @@ int main(void)
 			mpu_flag = 0U;
 			mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
 			MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
-			// MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
+			MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
 		}
 
 		/* 
@@ -160,13 +160,13 @@ int main(void)
 			{
 				print_task_flag = 0U;
 				/* 磁力计数据测试 */
-					// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
+				// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
 				/* 气压计数据测试 */
-				// usart_printf(USART1, "alt: %.2f  press: %.2f\r\n", alt, bmp_press);
+				usart_printf(USART3, "alt: %.1f aacz: %hd\r\n", alt, aacz);
 				/* 陀螺仪数据测试 */
 				// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 				/* 3个传感器数据 */
-				usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", Pitch, Roll, IMU_Yaw, alt); /* 无线串口 */
+				// usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", Pitch, Roll, IMU_Yaw, alt); /* 无线串口 */
 			}
 		#endif
 	}
