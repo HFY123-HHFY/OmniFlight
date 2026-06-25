@@ -7,9 +7,14 @@
 extern "C" {
 #endif
 
-/* 融合后的高度 (m) 与垂直速度 (m/s) */
+/* 融合后的高度 (m) */
 extern float Alt_Fused;
+
+/* 垂直速度 (m/s) */
 extern float Alt_Velocity;
+
+/* 设置高度环的目标值 */
+extern float Set_Alt;
 
 /*
  * 高度融合初始化：

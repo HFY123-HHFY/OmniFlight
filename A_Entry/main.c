@@ -117,7 +117,7 @@ int main(void)
 	Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
 
 /* ── 调试开关：起飞前设 0，关闭所有 printf ── */
-#define DEBUG_PRINT_ENABLE  0U
+#define DEBUG_PRINT_ENABLE  1U
 
 	while (1)
 	{
@@ -167,7 +167,7 @@ int main(void)
 				/* 磁力计数据测试 */
 				// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
 				/* 气压计数据测试 */
-				usart_printf(USART3, "alt: %.1f aacz: %hd F: %.1f\r\n", alt, aacz, Alt_Fused);
+				usart_printf(USART3, "alt: %.1f aacz: %hd F: %.1f S: %.1f\r\n", alt, aacz, Alt_Fused, Set_Alt);
 				/* 陀螺仪数据测试 */
 				// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 				/* 3个传感器数据 */

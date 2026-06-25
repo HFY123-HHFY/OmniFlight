@@ -476,5 +476,8 @@ void NRF24L01_Data(void)
 		{
 			speed_temp = rx_duty; //把油门给到PWM占空比
 		}
+
+		// 得到高度变化值
+		Set_Alt = *(float *)&NRF24L01_RxPacket[4];
 	}
 }
