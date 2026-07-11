@@ -9,8 +9,8 @@
  * 任务标志位 — 由定时器 ISR 置位，主循环轮询消费
  */
 extern volatile uint8_t nrf_task_flag;    /* 100Hz NRF24L01 遥控通信 (TIM2) */
-extern volatile uint8_t qmc_task_flag;    /* 50Hz  QMC5883P 磁力计  (TIM2) */
-extern volatile uint8_t bmp_task_flag;    /* 20Hz  BMP280 气压计    (TIM2) */
+// extern volatile uint8_t qmc_task_flag;    /* 50Hz  QMC5883P 磁力计  (TIM2) */
+// extern volatile uint8_t bmp_task_flag;    /* 20Hz  BMP280 气压计    (TIM2) */
 extern volatile uint8_t print_task_flag;  /* 10Hz  串口打印         (TIM2) */
 extern uint32_t Timer_Bsp_t;    /* 程序运行的时间戳（s） */
 

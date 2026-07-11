@@ -21,8 +21,8 @@ uint32_t Timer_Bsp_t = 0;
 
 /* TIM2 分发：慢速外设任务 */
 volatile uint8_t nrf_task_flag   = 0U;   /* 100Hz NRF24L01 遥控通信 */
-volatile uint8_t qmc_task_flag   = 0U;   /* 50Hz  QMC5883P 磁力计   */
-volatile uint8_t bmp_task_flag   = 0U;   /* 20Hz  BMP280 气压计     */
+// volatile uint8_t qmc_task_flag   = 0U;   /* 50Hz  QMC5883P 磁力计   */
+// volatile uint8_t bmp_task_flag   = 0U;   /* 20Hz  BMP280 气压计     */
 volatile uint8_t print_task_flag = 0U;   /* 10Hz  串口打印          */
 
 /* =========================================================================
@@ -75,8 +75,8 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 void Control_Task2_Callback(API_TIM_Id_t id)
 {
 	static uint8_t nrf_tick    = 0U;
-	static uint8_t qmc_tick    = 0U;
-	static uint8_t bmp_tick    = 0U;
+	// static uint8_t qmc_tick    = 0U;
+	// static uint8_t bmp_tick    = 0U;
 	static uint8_t printf_tick = 0U;
 	static uint16_t time_t     = 0U;
 
@@ -94,20 +94,20 @@ void Control_Task2_Callback(API_TIM_Id_t id)
 	}
 
 	/* ---- QMC5883P: 50Hz (每 20ms) ---- */
-	qmc_tick++;
-	if (qmc_tick >= 20U)
-	{
-		qmc_tick = 0U;
-		qmc_task_flag = 1U;
-	}
+	// qmc_tick++;
+	// if (qmc_tick >= 20U)
+	// {
+	// 	qmc_tick = 0U;
+	// 	qmc_task_flag = 1U;
+	// }
 
 	/* ---- BMP280: 20Hz (每 50ms) ---- */
-	bmp_tick++;
-	if (bmp_tick >= 50U)
-	{
-		bmp_tick = 0U;
-		bmp_task_flag = 1U;
-	}
+	// bmp_tick++;
+	// if (bmp_tick >= 50U)
+	// {
+	// 	bmp_tick = 0U;
+	// 	bmp_task_flag = 1U;
+	// }
 
 	/* ---- printf: 10Hz (每 100ms) ---- */
 	printf_tick++;
@@ -129,11 +129,15 @@ void Control_Task2_Callback(API_TIM_Id_t id)
 /* =========================================================================
  * Control_Task_USART_Callback — USART 中断回调
  *
- * 由 USART ISR 触发，调度 TX 队列排空（printf 异步发送的核心）。
- * 传 NULL 跳过 RX 接收处理，仅做 TX 排空。
+ * 由 USART ISR 触发，调度 TX 队列排空 + RX 自动入队。
+ * RX 数据由 ISR 自动写入环形队列，主循环通过 usart_read_byte() 消费。
  * 此回调必须注册（Enroll_USART_RegisterIrqHandler），否则 TXE 中断会无限循环。
  * ========================================================================= */
 void Control_Task_USART_Callback(API_USART_Id_t id)
 {
 	usart_irq_dispatch_by_id(id, 0, 0);
+	if (id == API_USART3)
+	{
+		
+	}
 }

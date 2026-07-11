@@ -43,6 +43,43 @@ static USART_TxAsyncQueue *usart_get_tx_queue(USART_TypeDef *USARTx)
 	return 0;
 }
 
+/*
+ * 接收环形队列结构：
+ * - head: ISR 生产者写入位置（RXNE 中断上下文）
+ * - tail: 主循环消费者取出位置
+ * - 单生产者单消费者，队满丢弃新字节，保护已接收数据完整性
+ */
+typedef struct
+{
+	USART_TypeDef *instance;
+	volatile uint16_t head;
+	volatile uint16_t tail;
+	uint8_t buf[USART_RX_BUF_SIZE];
+} USART_RxAsyncQueue;
+
+/* 每个 USART 实例对应一套异步接收队列。 */
+static USART_RxAsyncQueue g_usart_rx_q1 = {USART1, 0U, 0U, {0}};
+static USART_RxAsyncQueue g_usart_rx_q2 = {USART2, 0U, 0U, {0}};
+static USART_RxAsyncQueue g_usart_rx_q3 = {USART3, 0U, 0U, {0}};
+
+/* 根据 USART 实例返回对应接收队列。 */
+static USART_RxAsyncQueue *usart_get_rx_queue(USART_TypeDef *USARTx)
+{
+	if (USARTx == USART1)
+	{
+		return &g_usart_rx_q1;
+	}
+	if (USARTx == USART2)
+	{
+		return &g_usart_rx_q2;
+	}
+	if (USARTx == USART3)
+	{
+		return &g_usart_rx_q3;
+	}
+	return 0;
+}
+
 #if (ENROLL_MCU_TARGET != ENROLL_MCU_G3507)
 /* 进入临界区：返回进入前 PRIMASK 状态。 */
 static uint32_t usart_enter_critical(void)
@@ -477,12 +514,35 @@ void usart_irq_dispatch_by_id(API_USART_Id_t id, uint32_t *rxData, uint8_t *rxVa
 		q->asyncReady = 1U;
 	}
 
-	if ((rxData != 0) && (rxValid != 0))
+	/*
+	 * RX：始终从 DR 读取并写入环形队列，不依赖调用方是否传入 rxData/rxValid。
+	 * 这确保 RXNE 被及时清除，避免中断风暴。
+	 * rxData/rxValid 保留向后兼容：非空时额外回传本次读取的字节。
+	 */
+	if (usart_is_rx_ready(instance) != 0U)
 	{
-		*rxValid = 0U;
-		if (usart_is_rx_ready(instance) != 0U)
+		uint8_t rx_byte;
+		USART_RxAsyncQueue *rx_q;
+
+		rx_byte = (uint8_t)usart_read_data(instance);
+		rx_q = usart_get_rx_queue(instance);
+		if (rx_q != 0)
 		{
-			*rxData = usart_read_data(instance);
+			uint16_t next_head;
+
+			next_head = (uint16_t)((rx_q->head + 1U) % USART_RX_BUF_SIZE);
+			if (next_head != rx_q->tail)
+			{
+				rx_q->buf[rx_q->head] = rx_byte;
+				rx_q->head = next_head;
+			}
+			/* 队满则丢弃该字节，保护已入队数据不被覆盖 */
+		}
+
+		/* 向后兼容：调用方仍可通过 rxData/rxValid 取走本次字节 */
+		if ((rxData != 0) && (rxValid != 0))
+		{
+			*rxData = (uint32_t)rx_byte;
 			*rxValid = 1U;
 		}
 	}
@@ -491,6 +551,66 @@ void usart_irq_dispatch_by_id(API_USART_Id_t id, uint32_t *rxData, uint8_t *rxVa
 	{
 		usart_tx_irq_handler(instance);
 	}
+}
+
+/*
+ * 查询 RX 队列中可读字节数（非阻塞，主循环安全）。
+ * 返回：当前队列中可供读取的字节数。
+ */
+uint16_t usart_rx_available(USART_TypeDef *USARTx)
+{
+	USART_RxAsyncQueue *q;
+	uint32_t primask;
+	uint16_t head;
+	uint16_t tail;
+	uint16_t avail;
+
+	q = usart_get_rx_queue(USARTx);
+	if (q == 0)
+	{
+		return 0U;
+	}
+
+	primask = usart_enter_critical();
+	head = q->head;
+	tail = q->tail;
+	usart_exit_critical(primask);
+
+	avail = (uint16_t)((head - tail + USART_RX_BUF_SIZE) % USART_RX_BUF_SIZE);
+	return avail;
+}
+
+/*
+ * 从 RX 队列读取 1 字节（非阻塞，主循环安全）。
+ * 返回：1=读取成功，*Byte 存放数据；0=队列空。
+ */
+uint8_t usart_read_byte(USART_TypeDef *USARTx, uint8_t *Byte)
+{
+	USART_RxAsyncQueue *q;
+	uint32_t primask;
+
+	if (Byte == 0)
+	{
+		return 0U;
+	}
+
+	q = usart_get_rx_queue(USARTx);
+	if (q == 0)
+	{
+		return 0U;
+	}
+
+	primask = usart_enter_critical();
+	if (q->tail == q->head)
+	{
+		usart_exit_critical(primask);
+		return 0U;
+	}
+
+	*Byte = q->buf[q->tail];
+	q->tail = (uint16_t)((q->tail + 1U) % USART_RX_BUF_SIZE);
+	usart_exit_critical(primask);
+	return 1U;
 }
 
 /*

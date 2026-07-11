@@ -61,10 +61,11 @@ int main(void)
 	API_TIM_RegisterIrqHandler(API_TIM2, Control_Task2_Callback);               /* TIM2: printf/时间戳 */
 
 /* 初始化层：初始化相关外设，启动硬件功能 */
-	API_USART_Init(API_USART1, 115200U); // 初始化 USART1，波特率 115200
-	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200
+	API_USART_Init(API_USART1, 230400U); // 初始化 USART1，波特率 115200 -- 与 STP-23L 通信
+	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200 -- 板载调试串口
+	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200 -- 无线串口调试
 
-	IMU_Init();			/* IMU 偏航融合初始化（必须在 TIM1 之前，否则 ISR 用未初始化状态） */
+	// IMU_Init();			/* IMU 偏航融合初始化（必须在 TIM1 之前，否则 ISR 用未初始化状态） */
 	API_TIM_Init(API_TIM1, 1U); /* TIM1: PID 节拍，每 1ms */
 	API_TIM_Init(API_TIM2, 1U); /* TIM2: printf/时间戳  每 1ms */
 	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U);
@@ -86,17 +87,17 @@ int main(void)
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
 	float gravity_ref = 0.0f;
-	if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
-	{
-		/* calib timeout - halt */
-		while (1) {}
-	}
+	// if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
+	// {
+	// 	/* calib timeout - halt */
+	// 	while (1) {}
+	// }
 	/* 初始化QMC5883P */
-	QMC_Init();
+	// QMC_Init();
 	/* 高度融合初始化（5秒重力参考采集） */
-	Altitude_Init(gravity_ref);
+	// Altitude_Init(gravity_ref);
 	/* 初始化BMP280（5秒自动地面归零校准） */
-	BMP280Init();
+	// BMP280Init();
 	/* 初始化NRF24L01 */	
 	NRF24L01_Init();	
 	/* 初始化PID控制 */
@@ -104,7 +105,7 @@ int main(void)
 	/* 初始化DShot协议 */
 	DShot_Init();	
 	/* 所有外设初始化完成-蜂鸣器初始化 */
-	Buzzer_Init();	
+	Buzzer_Init();
 
 	/*      
 	 * 串级PID参数（基于 dt=0.002s，500Hz）
@@ -141,22 +142,22 @@ int main(void)
 
 		/* 
 		* 磁力计 (50Hz) */
-		if (qmc_task_flag != 0U)
-		{
-			qmc_task_flag = 0U;
-			Angle_XY = QMC_Data();
-			IMU_Yaw_CorrectMag(Angle_XY);   /* 磁力计校正偏航漂移 */
-			IMU_Yaw = IMU_Get_Yaw();	/* 同步更新融合偏航角，供外部调用 */
-		}
+		// if (qmc_task_flag != 0U)
+		// {
+		// 	qmc_task_flag = 0U;
+		// 	Angle_XY = QMC_Data();
+		// 	IMU_Yaw_CorrectMag(Angle_XY);   /* 磁力计校正偏航漂移 */
+		// 	IMU_Yaw = IMU_Get_Yaw();	/* 同步更新融合偏航角，供外部调用 */
+		// }
 
 		/* 
 		*气压计 (20Hz) */
-		if (bmp_task_flag != 0U)
-		{
-			bmp_task_flag = 0U;
-			alt = BMP_Data();
-			Altitude_Update(aacz, alt, 0.05f);
-		}
+		// if (bmp_task_flag != 0U)
+		// {
+		// 	bmp_task_flag = 0U;
+		// 	alt = BMP_Data();
+		// 	Altitude_Update(aacz, alt, 0.05f);
+		// }
 
 		/*
 		*串口打印 (10Hz) */
@@ -167,7 +168,7 @@ int main(void)
 				/* 磁力计数据测试 */
 				// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
 				/* 气压计数据测试 */
-				usart_printf(USART3, "alt: %.1f aacz: %hd F: %.1f S: %.1f\r\n", alt, aacz, Alt_Fused, Set_Alt);
+				// usart_printf(USART3, "alt: %.1f aacz: %hd F: %.1f S: %.1f\r\n", alt, aacz, Alt_Fused, Set_Alt);
 				/* 陀螺仪数据测试 */
 				// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 				/* 3个传感器数据 */

@@ -20,6 +20,11 @@
 #define USART_TX_BUF_SIZE 512U
 #endif
 
+/* 异步接收环形缓冲区大小（字节）。 */
+#ifndef USART_RX_BUF_SIZE
+#define USART_RX_BUF_SIZE 256U
+#endif
+
 /* printf 默认输出串口（可在编译参数或上层头文件中重定义）。 */
 #ifndef PRINTF_USART
 #define PRINTF_USART USART1
@@ -80,6 +85,20 @@ void usart_send_byte(USART_TypeDef *USARTx, uint8_t Byte);
  * 返回：1=入队成功，0=队列满或串口不支持。
  */
 uint8_t usart_send_byte_async(USART_TypeDef *USARTx, uint8_t Byte);
+
+/*
+ * RX 异步队列 — 非阻塞读取
+ * 字节由 ISR 自动入队，主循环调用以下接口消费。
+ */
+
+/* 查询 RX 队列中可读字节数（非阻塞）。 */
+uint16_t usart_rx_available(USART_TypeDef *USARTx);
+
+/*
+ * 从 RX 队列读取 1 字节（非阻塞）。
+ * 返回：1=读取成功，0=队列空。
+ */
+uint8_t usart_read_byte(USART_TypeDef *USARTx, uint8_t *Byte);
 
 /* 发送以 '\0' 结尾的字符串。 */
 void usart_SendString(USART_TypeDef *USARTx, const char *String);
