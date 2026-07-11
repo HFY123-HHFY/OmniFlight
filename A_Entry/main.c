@@ -41,6 +41,7 @@
 #include "Buzzer.h"
 #include "IMU.h"
 #include "Altitude.h"
+#include "STP23L.h"
 
 int main(void)
 {
@@ -61,7 +62,7 @@ int main(void)
 	API_TIM_RegisterIrqHandler(API_TIM2, Control_Task2_Callback);               /* TIM2: printf/时间戳 */
 
 /* 初始化层：初始化相关外设，启动硬件功能 */
-	API_USART_Init(API_USART1, 230400U); // 初始化 USART1，波特率 115200 -- 与 STP-23L 通信
+	API_USART_Init(API_USART1, 230400U); // 初始化 USART1，波特率 230400U -- 与 STP-23L 通信
 	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200 -- 板载调试串口
 	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200 -- 无线串口调试
 
@@ -87,6 +88,7 @@ int main(void)
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
 	float gravity_ref = 0.0f;
+	(void)gravity_ref;  /* TODO: 取消注释 GyroBias_Calibrate 后移除此行 */
 	// if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
 	// {
 	// 	/* calib timeout - halt */
@@ -106,8 +108,10 @@ int main(void)
 	DShot_Init();	
 	/* 所有外设初始化完成-蜂鸣器初始化 */
 	Buzzer_Init();
+	/* 初始化STP-23L激光雷达协议解析 */
+	STP23L_Init();
 
-	/*      
+	/*
 	 * 串级PID参数（基于 dt=0.002s，500Hz）
 	 * 调参顺序：先 KP → 再 KD → 最后 KI
 	 */
@@ -122,7 +126,7 @@ int main(void)
 
 	while (1)
 	{
-		/* 
+		/*
 		*MPU6050数据读取（陀螺仪 + DMP 姿态）*/
 		if (mpu_flag == 1U)
 		{
@@ -131,6 +135,10 @@ int main(void)
 			MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
 			MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
 		}
+
+		/*
+		* USART1: STP-23L 激光雷达 */
+		STP23L_Task();
 
 		/* 
 		* 遥控链路 (100Hz)  遥控输入 + 遥测回传*/
@@ -165,6 +173,10 @@ int main(void)
 			if (print_task_flag != 0U)
 			{
 				print_task_flag = 0U;
+				/* STP-23L 激光雷达距离 */
+				usart_printf(USART2, "STP: %.3fm %dmm f=%lu rx=%lu\r\n",
+					(double)stp23l_distance, (int)stp23l_distance_mm,
+					(unsigned long)stp23l_frame_cnt);
 				/* 磁力计数据测试 */
 				// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", Angle_XY, IMU_Yaw, (float)gyroz / GYRO_SENS_2000DPS, IMU_Get_GyroBias());
 				/* 气压计数据测试 */

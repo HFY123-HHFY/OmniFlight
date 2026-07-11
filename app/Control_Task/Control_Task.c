@@ -8,6 +8,7 @@
 #include "Motor.h"
 #include "MPU6050.h"
 #include "IMU.h"
+#include "STP23L.h"
 
 /* =========================================================================
  * 任务标志位
@@ -127,17 +128,38 @@ void Control_Task2_Callback(API_TIM_Id_t id)
 }
 
 /* =========================================================================
- * Control_Task_USART_Callback — USART 中断回调
+ * Control_Task_USART_Callback — USART 中断回调（所有 USART 共用入口）
  *
- * 由 USART ISR 触发，调度 TX 队列排空 + RX 自动入队。
- * RX 数据由 ISR 自动写入环形队列，主循环通过 usart_read_byte() 消费。
+ * 职责：
+ *   1) TX 队列排空（异步 printf 的核心）
+ *   2) RX 字节读 DR → 按串口 ID 分发到对应 BSP 驱动的入队接口
+ *
+ * ★ ISR 只做硬件搬运 + 入队，协议解析留给主循环
+ *
  * 此回调必须注册（Enroll_USART_RegisterIrqHandler），否则 TXE 中断会无限循环。
  * ========================================================================= */
 void Control_Task_USART_Callback(API_USART_Id_t id)
 {
-	usart_irq_dispatch_by_id(id, 0, 0);
-	if (id == API_USART3)
+	uint32_t data;
+	uint8_t  rxValid;
+
+	/*
+	 * 循环排空 RX：F407 USART 无硬件 FIFO，但 do-while 防止未来移植到
+	 * 有 FIFO 的 MCU 时数据堆积。
+	 */
+	do
 	{
-		
-	}
+		data    = 0U;
+		rxValid = 0U;
+		usart_irq_dispatch_by_id(id, &data, &rxValid);
+
+		if (rxValid != 0U)
+		{
+			/* ── 按串口 ID 分发：只入队，解析交给主循环 Task ── */
+			if (id == API_USART1)
+			{
+				STP23L_RxPush((uint8_t)data);  /* USART1: STP-23L 激光雷达 */
+			}
+		}
+	} while (rxValid != 0U);
 }

@@ -216,6 +216,7 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
         ${CMAKE_SOURCE_DIR}/BSP/Dshot/Dshot.c
         ${CMAKE_SOURCE_DIR}/BSP/Motor/Motor.c
         ${CMAKE_SOURCE_DIR}/BSP/Buzzer/Buzzer.c
+        ${CMAKE_SOURCE_DIR}/BSP/STP23L/STP23L.c
     )
     # F407 专属头文件目录
     set(MCU_INCLUDE_DIRS
@@ -227,6 +228,7 @@ elseif(RESOLVED_MCU_TARGET STREQUAL "F407")
         ${CMAKE_SOURCE_DIR}/BSP/Dshot
         ${CMAKE_SOURCE_DIR}/BSP/Motor
         ${CMAKE_SOURCE_DIR}/BSP/Buzzer
+        ${CMAKE_SOURCE_DIR}/BSP/STP23L
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/inc
         ${CMAKE_SOURCE_DIR}/Core/STM32F407/f407_soft_spi
         ${CMAKE_SOURCE_DIR}/Drivers/Drivers_STM32F4/Start
