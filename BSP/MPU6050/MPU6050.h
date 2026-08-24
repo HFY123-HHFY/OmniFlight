@@ -15,17 +15,10 @@
  * - FIFO_RETRY: 读取 DMP FIFO 的重试次数
  * - FIFO_RETRY_DELAY: 每次重试间隔
  */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#define MPU6050_DMP_STARTUP_DELAY_MS      (20U)
-#define MPU6050_DMP_FIFO_RETRY_COUNT      (15U)
-#define MPU6050_DMP_FIFO_RETRY_DELAY_MS   (2U)
-#define MPU6050_DMP_ENABLE_SELF_TEST       (0U)
-#else
 #define MPU6050_DMP_STARTUP_DELAY_MS      (10U)
 #define MPU6050_DMP_FIFO_RETRY_COUNT      (8U)
 #define MPU6050_DMP_FIFO_RETRY_DELAY_MS   (1U)
 #define MPU6050_DMP_ENABLE_SELF_TEST       (1U)
-#endif
 
 #ifdef __cplusplus
 extern "C" {

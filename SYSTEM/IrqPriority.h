@@ -8,29 +8,8 @@
  * - 数字越小，优先级越高（NVIC 标准语义）
  * - 策略集中在这里，Core 层只接受优先级参数而不做决策
  *
- * NVIC 差异：
- * - STM32F407: Cortex-M4, 4bit NVIC, 0~15
- * - STM32F103: Cortex-M3, 4bit NVIC, 0~15
- * - MSPM0G3507: Cortex-M0+, 2bit NVIC, 0~3
+ * STM32F407: Cortex-M4, 4bit NVIC, 优先级 0~15
  */
-
-/* ================================================================
- *  G3507：2 bit 优先级 (0~3)，需要压缩映射
- * ================================================================ */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-
-#define IRQ_PRIO_MPU6050     0U   /* 最高：姿态传感器            */
-#define IRQ_PRIO_TIM_CTRL    1U   /* 高：1ms 控制节拍            */
-#define IRQ_PRIO_TIM_AUX     1U   /* 合并到 TIM_CTRL（2bit 只有 4 级） */
-#define IRQ_PRIO_USART       2U   /* 中：串口通信              */
-#define IRQ_PRIO_DEFAULT     3U   /* 低：未指定中断            */
-
-#define IRQ_SUB_PRIO_MPU6050 0U
-
-/* ================================================================
- *  F103 / F407：4 bit 优先级 (0~15)
- * ================================================================ */
-#else
 
 #define IRQ_PRIO_MPU6050     1U   /* 最高实时：姿态传感器       */
 #define IRQ_PRIO_TIM_CTRL    2U   /* 高实时：1ms 控制节拍        */
@@ -39,7 +18,5 @@
 #define IRQ_PRIO_DEFAULT     5U   /* 最低：缺省中断               */
 
 #define IRQ_SUB_PRIO_MPU6050 0U
-
-#endif /* ENROLL_MCU_TARGET */
 
 #endif /* __IRQ_PRIORITY_H */

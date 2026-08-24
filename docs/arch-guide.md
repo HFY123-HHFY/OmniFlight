@@ -12,7 +12,7 @@
 | **基于框架** | [OmniLayer](https://github.com/HFY123-HHFY/OmniLayer.git) |
 | **主控** | STM32F407VET6 (Cortex-M4 + FPU, 168MHz, 512KB Flash, 128KB RAM) |
 | **构建工具** | CMake + GCC ARM Embedded + OpenOCD |
-| **IDE** | VS Code (主) + Keil MDK (保留) |
+| **IDE** | VS Code (CMake + GCC + OpenOCD) |
 | **默认 MCU** | `ENROLL_MCU_F407` (定义于 Enroll/Enroll.h) |
 | **分支** | `main` (裸机飞控主线) |
 
@@ -61,7 +61,7 @@
 ┌────────────────────────────────────────┐
 │  Core/          芯片底层实现            │
 │  STM32F407/     f407_gpio/pwm/tim/...  │  直接寄存器操作
-│  STM32F103/ MSPM0G3507/ (保留)         │  + f407_dma (DMA 抽象)
+│                 + f407_dma (DMA 抽象)   │
 └────────────────────────────────────────┘
               ↓
 ┌────────────────────────────────────────┐
@@ -76,9 +76,11 @@
 
 | MCU | 状态 |
 |-----|:---:|
-| **STM32F407VET6** | ★ 主力开发 |
-| STM32F103C8T6 | 架构保留 |
-| MSPM0G3507 | 架构保留 |
+| **STM32F407VET6** | ★ 唯一目标 |
+
+> 架构通过 Enroll 注册层 + X-Macro 编译期映射实现算法与芯片解耦，本身可移植。
+> F103 / MSPM0G3507 的移植曾用于验证该抽象，现已归档至 `git tag archive/multi-mcu-f103-g3507`；
+> 毕设主线为聚焦 F407 + FreeRTOS 实时化，主分支仅保留 F407。
 
 ---
 
@@ -287,7 +289,7 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 2. **NRF24L01 CE 注册**：`Enroll_NRF24L01_Register()` 必须在 `NRF24L01_Init()` 前调用
 3. **DShot 电调**：油门值需从最低（48）逐步递增，电调才响应
 4. **printf 异步 TX**：必须注册 USART 中断回调，否则 TX 队列不会排空
-5. **F407 以外平台**：f407_dma、Dshot、Motor、Buzzer 仅在 F407 编译
+5. **单平台**：全工程仅针对 STM32F407 编译；多平台移植（F103/G3507）见归档 tag `archive/multi-mcu-f103-g3507`
 6. **IMU_Init 顺序**：必须在 `API_TIM_Init(TIM1)` 之前调用，否则 ISR 访问未初始化状态
 7. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
 8. **I2C 总线**：所有 I2C 读写仅在主循环，ISR 不触碰 I2C（硬件 I2C 不可重入）

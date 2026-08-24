@@ -20,10 +20,8 @@ typedef struct
 	uint8_t id;
 	void *sclPort;
 	uint32_t sclPin;
-	uint32_t sclIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 	void *sdaPort;
 	uint32_t sdaPin;
-	uint32_t sdaIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 } API_I2C_Config_t;
 
 typedef enum

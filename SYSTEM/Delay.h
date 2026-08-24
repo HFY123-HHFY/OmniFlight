@@ -15,8 +15,7 @@ extern "C" {
  *
  * 说明：
  * - 上层只需要 include 本头文件，不需要关心具体 MCU 型号。
- * - 实际实现由 Core/STM32F103/f103_delay.c 或
- *   Core/STM32F407/f407_delay.c 提供。
+ * - 实际实现由 Core/STM32F407/f407_delay.c 提供。
  */
 void Delay_us(uint32_t us);
 void Delay_ms(uint32_t ms);

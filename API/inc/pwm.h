@@ -27,16 +27,6 @@ typedef enum
 	API_PWM_CH4 = 4U
 } API_PWM_Channel_t;
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#define API_PWM_CORE_TIM1   (1U)
-#define API_PWM_CORE_TIM2   (2U)
-#define API_PWM_CORE_TIM3   (3U)
-#define API_PWM_CORE_TIM4   (4U)
-#define API_PWM_CORE_CH1    (1U)
-#define API_PWM_CORE_CH2    (2U)
-#define API_PWM_CORE_CH3    (3U)
-#define API_PWM_CORE_CH4    (4U)
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #define API_PWM_CORE_TIM1   (1U)
 #define API_PWM_CORE_TIM2   (2U)
 #define API_PWM_CORE_TIM3   (3U)
@@ -47,12 +37,6 @@ typedef enum
 #define API_PWM_CORE_CH2    (2U)
 #define API_PWM_CORE_CH3    (3U)
 #define API_PWM_CORE_CH4    (4U)
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#define API_PWM_CORE_TIMA0  (2U)
-#define API_PWM_CORE_TIMA1  (3U)
-#define API_PWM_CORE_CCP0   (0U)
-#define API_PWM_CORE_CCP1   (1U)
-#endif
 
 typedef struct
 {
@@ -70,15 +54,7 @@ typedef struct
 	uint32_t pin;
 } API_PWM_Config_t;
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "f103_pwm.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #include "f407_pwm.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_pwm.h"
-#else
-#error "Unsupported ENROLL_MCU_TARGET."
-#endif
 
 /* 注册板级 PWM 引脚映射表。 */
 void API_PWM_Register(const API_PWM_Config_t *configTable, uint8_t count);

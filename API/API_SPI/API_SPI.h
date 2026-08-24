@@ -23,19 +23,15 @@ typedef struct
 	/* CS 片选端口/引脚。 */
 	void *csPort;
 	uint32_t csPin;
-	uint32_t csIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 	/* SCK 时钟端口/引脚。 */
 	void *sckPort;
 	uint32_t sckPin;
-	uint32_t sckIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 	/* MOSI 主发从收端口/引脚。 */
 	void *mosiPort;
 	uint32_t mosiPin;
-	uint32_t mosiIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 	/* MISO 主收从发端口/引脚。 */
 	void *misoPort;
 	uint32_t misoPin;
-	uint32_t misoIomux; /* G3507 IOMUX PINCM index; 0 for STM32 */
 } API_SPI_Config_t;
 
 typedef enum

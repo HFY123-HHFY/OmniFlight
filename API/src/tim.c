@@ -7,17 +7,6 @@ static uint8_t s_timCount;
 static API_TIM_IrqHandler_t s_timIrqHandlers[API_TIM_MAX_ID + 1U];
 static uint8_t s_timStarted[API_TIM_MAX_ID + 1U];
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-static void API_TIM_CoreInit(uint8_t coreId, uint32_t periodMs)
-{
-	F103_TIM_PeriodicInit(coreId, periodMs);
-}
-
-static uint8_t API_TIM_CoreCheckAndClearIrq(uint8_t coreId)
-{
-	return F103_TIM_CheckAndClearUpdateIrq(coreId);
-}
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 static void API_TIM_CoreInit(uint8_t coreId, uint32_t periodMs)
 {
 	F407_TIM_PeriodicInit(coreId, periodMs);
@@ -27,29 +16,6 @@ static uint8_t API_TIM_CoreCheckAndClearIrq(uint8_t coreId)
 {
 	return F407_TIM_CheckAndClearUpdateIrq(coreId);
 }
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-static void API_TIM_CoreInit(uint8_t coreId, uint32_t periodMs)
-{
-	G3507_TIM_PeriodicInit(coreId, periodMs);
-}
-
-static uint8_t API_TIM_CoreCheckAndClearIrq(uint8_t coreId)
-{
-	return G3507_TIM_CheckAndClearUpdateIrq(coreId);
-}
-#else
-static void API_TIM_CoreInit(uint8_t coreId, uint32_t periodMs)
-{
-	(void)coreId;
-	(void)periodMs;
-}
-
-static uint8_t API_TIM_CoreCheckAndClearIrq(uint8_t coreId)
-{
-	(void)coreId;
-	return 0U;
-}
-#endif
 
 static uint8_t API_TIM_IsValidId(API_TIM_Id_t id)
 {
@@ -159,22 +125,6 @@ void API_TIM_HandleIrqByCoreId(uint8_t coreId)
 	}
 }
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-void TIM2_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIM2);
-}
-
-void TIM3_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIM3);
-}
-
-void TIM4_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIM4);
-}
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 void TIM2_IRQHandler(void)
 {
 	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIM2);
@@ -194,39 +144,3 @@ void TIM5_IRQHandler(void)
 {
 	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIM5);
 }
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-void TIMG0_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMG0);
-}
-
-void TIMG6_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMG6);
-}
-
-void TIMA0_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMA0);
-}
-
-void TIMA1_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMA1);
-}
-
-void TIMG7_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMG7);
-}
-
-void TIMG8_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMG8);
-}
-
-void TIMG12_IRQHandler(void)
-{
-	API_TIM_HandleIrqByCoreId(API_TIM_CORE_TIMG12);
-}
-#endif

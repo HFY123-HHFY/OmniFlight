@@ -57,7 +57,7 @@ int main(void)
 	Enroll_NRF24L01_Register();				/* NRF24L01 CE 引脚注册 */
 
 	/* 注册后绑定中断回调*/
-	Enroll_USART_RegisterIrqHandler(Control_Task_USART_Callback); 		/* USART 中断回调：注册时自动使能异步 TX */
+	Enroll_USART_RegisterIrqHandler(Control_Task_USART_Callback); 				/* USART 中断回调：注册时自动使能异步 TX */
 	API_TIM_RegisterIrqHandler(API_TIM1, Control_Task1_Callback);           	/* TIM1: PID */
 	API_TIM_RegisterIrqHandler(API_TIM2, Control_Task2_Callback);               /* TIM2: printf/时间戳 */
 

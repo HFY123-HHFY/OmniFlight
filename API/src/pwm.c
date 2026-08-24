@@ -1,12 +1,5 @@
 #include "pwm.h"
-
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "103_hw_config.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #include "407_hw_config.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_hw_config.h"
-#endif
 
 /* 注册层下发的 PWM 引脚映射表。 */
 static const API_PWM_Config_t *s_pwmTable = 0;
@@ -146,17 +139,6 @@ void API_PWM_Init(API_PWM_Tim_t timId, uint16_t arr, uint16_t psc)
 		return;
 	}
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-	/* 先按映射表配置该定时器对应的所有 PWM 引脚，再启动定时器基准。 */
-	for (i = 0U; i < s_pwmCount; ++i)
-	{
-		if (s_pwmTable[i].timId == timId)
-		{
-			F103_PWM_ConfigPin(s_pwmTable[i].port, s_pwmTable[i].pin);
-		}
-	}
-	F103_PWM_InitTimer(timerConfig->coreTimId, arr, psc);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 	/* 先按映射表配置该定时器对应的所有 PWM 引脚，再启动定时器基准。 */
 	for (i = 0U; i < s_pwmCount; ++i)
 	{
@@ -166,20 +148,6 @@ void API_PWM_Init(API_PWM_Tim_t timId, uint16_t arr, uint16_t psc)
 		}
 	}
 	F407_PWM_InitTimer(timerConfig->coreTimId, arr, psc);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	for (i = 0U; i < s_pwmCount; ++i)
-	{
-		if (s_pwmTable[i].timId == timId)
-		{
-			G3507_PWM_ConfigPin(s_pwmTable[i].coreTimId, s_pwmTable[i].coreChannel);
-		}
-	}
-	G3507_PWM_InitTimer(timerConfig->coreTimId, arr, psc);
-#else
-	(void)timId;
-	(void)arr;
-	(void)psc;
-#endif
 }
 
 void API_PWM_Setcom(API_PWM_Tim_t timId, API_PWM_Channel_t channel, uint16_t ccr)
@@ -197,17 +165,7 @@ void API_PWM_Setcom(API_PWM_Tim_t timId, API_PWM_Channel_t channel, uint16_t ccr
 		return;
 	}
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-	F103_PWM_SetCCR(config->coreTimId, config->coreChannel, ccr);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 	F407_PWM_SetCCR(config->coreTimId, config->coreChannel, ccr);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	G3507_PWM_SetCCR(config->coreTimId, config->coreChannel, ccr);
-#else
-	(void)timId;
-	(void)channel;
-	(void)ccr;
-#endif
 }
 
 /*
@@ -229,10 +187,5 @@ void API_PWM_SetPeriod(API_PWM_Tim_t timId, uint16_t arr)
 		return;
 	}
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 	F407_PWM_SetARR(config->coreTimId, arr);
-#else
-	(void)config;
-	(void)arr;
-#endif
 }

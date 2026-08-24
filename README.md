@@ -6,13 +6,13 @@
 
 OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整的四轴飞控。
 
-- 同一套飞控代码，切换 Enroll 层硬件映射可跨 F407 / F103 / G3507 编译
+- Enroll 注册层 + X-Macro 编译期映射，让飞控算法与芯片底层解耦（可移植架构）
 - 复用 OmniLayer 的 CMake + GCC + OpenOCD 全工具链
 - 积累的 PID、滤波器、传感器驱动、混控算法可复用于后续机器人项目
 
 ## ✨ 亮点
 
-- 🧭 **多目标飞控** — 同一套代码，F407 / F103 / G3507 切换编译
+- 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
 - 🎛️ **串级 PID** — 外环角度 + 内环角速度，500Hz 控制节拍
 - 📡 **传感器融合** — MPU6050 DMP (Pitch/Roll) + QMC5883P 磁力计 + BMP280 气压计 + IMU 互补滤波 (Yaw) + 高度互补滤波 (aacz + BMP280)
@@ -74,7 +74,7 @@ OmniFlight/
 │  ├─ API_I2C/                 # 软件 I2C 协议层
 │  └─ API_SPI/                 # 软件 SPI 协议层
 ├─ Enroll/                     # ★ 硬件资源注册中心
-├─ Core/                       # 芯片底层实现（F103/F407/G3507）
+├─ Core/                       # 芯片底层实现（STM32F407）
 ├─ Drivers/                    # 启动文件 + CMSIS
 ├─ SYSTEM/                     # sys/Delay/BusRate/IrqPriority
 ├─ OpenOCD/                    # 下载配置
@@ -115,13 +115,10 @@ OmniFlight/
 |--------|------|
 | `F7` | 编译（Debug 预设） |
 | `F8` | 烧录 |
-| `Ctrl+Shift+F1` | 选择 MCU 后编译 |
-| `Ctrl+Shift+F2` | 选择 MCU 后下载 |
-| `Ctrl+Shift+F3` | 切换默认 MCU 目标 |
 
 ```bash
-cmake --preset Debug-F407
-cmake --build --preset Debug-F407
+cmake --preset Debug
+cmake --build --preset Debug
 ```
 
 ## 📖 详细文档
@@ -131,8 +128,8 @@ cmake --build --preset Debug-F407
 
 ## ⚠️ 注意事项
 
-- 主力维护 VS Code + CMake 环境，F407 为目标 MCU
-- F103 / G3507 架构保留，暂不开发
+- 目标 MCU：STM32F407VET6（唯一维护目标，专注 F407 + FreeRTOS）
+- 多平台移植（F103 / MSPM0G3507）已归档至 `git tag archive/multi-mcu-f103-g3507`，主分支不再保留
 - DShot 电调需从最低油门（48）逐步递增，不可直接跳到大油门值
 - 上电后需保持飞行器静止 ~10 秒（陀螺+重力校准 5s + BMP 归零 5s）
 

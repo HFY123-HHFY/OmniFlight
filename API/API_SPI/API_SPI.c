@@ -49,10 +49,10 @@ void API_SPI_Register(const API_SPI_Config_t *configTable, uint8_t count)
 	if ((configTable != 0) && (count > 0U))
 	{
 		s_activeBusId = (API_SPI_BusId_t)configTable[0].id;
-		soft_spi_hal_init(configTable[0].csPort, configTable[0].csPin, configTable[0].csIomux,
-		                  configTable[0].sckPort, configTable[0].sckPin, configTable[0].sckIomux,
-		                  configTable[0].mosiPort, configTable[0].mosiPin, configTable[0].mosiIomux,
-		                  configTable[0].misoPort, configTable[0].misoPin, configTable[0].misoIomux);
+		soft_spi_hal_init(configTable[0].csPort, configTable[0].csPin,
+		                  configTable[0].sckPort, configTable[0].sckPin,
+		                  configTable[0].mosiPort, configTable[0].mosiPin,
+		                  configTable[0].misoPort, configTable[0].misoPin);
 	}
 	else
 	{
@@ -74,10 +74,10 @@ void API_SPI_SelectBus(API_SPI_BusId_t busId)
 	if (cfg != 0)
 	{
 		s_activeBusId = busId;
-		soft_spi_hal_init(cfg->csPort, cfg->csPin, cfg->csIomux,
-		                  cfg->sckPort, cfg->sckPin, cfg->sckIomux,
-		                  cfg->mosiPort, cfg->mosiPin, cfg->mosiIomux,
-		                  cfg->misoPort, cfg->misoPin, cfg->misoIomux);
+		soft_spi_hal_init(cfg->csPort, cfg->csPin,
+		                  cfg->sckPort, cfg->sckPin,
+		                  cfg->mosiPort, cfg->mosiPin,
+		                  cfg->misoPort, cfg->misoPin);
 	}
 
 	/* 总线切换后恢复默认延时 */
@@ -163,10 +163,10 @@ void API_SPI_Init(void)
 	for (i = 0U; i < s_spiCount; i++)
 	{
 		const API_SPI_Config_t *cfg = &s_spiTable[i];
-		soft_spi_hal_init(cfg->csPort, cfg->csPin, cfg->csIomux,
-		                  cfg->sckPort, cfg->sckPin, cfg->sckIomux,
-		                  cfg->mosiPort, cfg->mosiPin, cfg->mosiIomux,
-		                  cfg->misoPort, cfg->misoPin, cfg->misoIomux);
+		soft_spi_hal_init(cfg->csPort, cfg->csPin,
+		                  cfg->sckPort, cfg->sckPin,
+		                  cfg->mosiPort, cfg->mosiPin,
+		                  cfg->misoPort, cfg->misoPin);
 	}
 
 	/* 恢复活跃总线的寄存器指针 */
@@ -174,10 +174,10 @@ void API_SPI_Init(void)
 		const API_SPI_Config_t *cfg = API_SPI_GetConfigById(prevBus);
 		if (cfg != 0)
 		{
-			soft_spi_hal_init(cfg->csPort, cfg->csPin, cfg->csIomux,
-			                  cfg->sckPort, cfg->sckPin, cfg->sckIomux,
-			                  cfg->mosiPort, cfg->mosiPin, cfg->mosiIomux,
-			                  cfg->misoPort, cfg->misoPin, cfg->misoIomux);
+			soft_spi_hal_init(cfg->csPort, cfg->csPin,
+			                  cfg->sckPort, cfg->sckPin,
+			                  cfg->mosiPort, cfg->mosiPin,
+			                  cfg->misoPort, cfg->misoPin);
 		}
 	}
 

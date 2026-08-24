@@ -10,20 +10,12 @@
  * 3) 对 App 暴露统一入口，避免 App 直接依赖具体 MCU 细节。
  */
 
-/* MCU 目标常量：放在注册层头文件，便于统一查看与管理。 */
-#ifndef ENROLL_MCU_F103
-#define ENROLL_MCU_F103   0U
-#endif
-
+/* MCU 目标常量：毕设主线仅支持 STM32F407。 */
 #ifndef ENROLL_MCU_F407
 #define ENROLL_MCU_F407   1U
 #endif
 
-#ifndef ENROLL_MCU_G3507
-#define ENROLL_MCU_G3507  2U
-#endif
-
-/* 默认MCU */
+/* 目标 MCU：固定为 F407。 */
 #ifndef ENROLL_MCU_TARGET
 #define ENROLL_MCU_TARGET  ENROLL_MCU_F407
 #endif
@@ -36,18 +28,8 @@
 #include "usart.h"    /* API_USART_IrqHandler_t */
 #include "tim.h"      /* API_TIM_IrqHandler_t */
 
-/*
- * 条件编译选择不同 MCU 的 hw_config。
- */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "103_hw_config.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
+/* 板级硬件映射表（F407）。 */
 #include "407_hw_config.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_hw_config.h"
-#else
-#error "Unsupported ENROLL_MCU_TARGET. Use 0(F103), 1(F407), or 2(G3507)."
-#endif
 
 #ifdef __cplusplus
 extern "C" {

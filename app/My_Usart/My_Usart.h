@@ -5,7 +5,7 @@
  * My_Usart 模块说明：
  * 1) 统一提供“应用层可直接调用”的串口发送/printf/数据包解析接口；
  * 2) 保持与原标准库封装接近的函数名和调用方式；
- * 3) 底层适配当前工程 API 层(usart.h)与 F103/F407 双平台寄存器视图。
+ * 3) 底层适配当前工程 API 层(usart.h)与 F407 寄存器视图。
  */
 
 #include "Enroll.h"
@@ -40,19 +40,9 @@
 
 /*
  * USART_TypeDef 统一别名：
- * - F103: 对应 F103_USART_View_t
  * - F407: 对应 F407_USART_View_t
- * - G3507: 对应 G3507_USART_View_t
  */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-typedef F103_USART_View_t USART_TypeDef;
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 typedef F407_USART_View_t USART_TypeDef;
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-typedef G3507_USART_View_t USART_TypeDef;
-#else
-#error "Unsupported ENROLL_MCU_TARGET."
-#endif
 
 /*
  * 串口数据包解析状态结构：

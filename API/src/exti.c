@@ -1,20 +1,7 @@
 #include "exti.h"
 #include <stdlib.h>
 #include "sys.h"
-
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "f103_exti.h"
-#include <stdlib.h>
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #include "f407_exti.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_exti.h"
-#include "G3507_Encoder.h"
-#include "ti/devices/msp/m0p/mspm0g350x.h"
-#include "ti/driverlib/m0p/dl_interrupt.h"
-#else
-#error "Unsupported ENROLL_MCU_TARGET for API EXTI backend."
-#endif
 
 
 #define API_EXTI_MAX_ID  (16U)
@@ -47,37 +34,13 @@ static const API_EXTI_Config_t *API_EXTI_FindConfigById(API_EXTI_Id_t id)
 static void API_EXTI_CoreInit(void *port, uint32_t pin, API_EXTI_Trigger_t trigger,
 	uint32_t irqn, uint8_t preemptPriority, uint8_t subPriority)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-	F103_EXTI_Init(port, SYS_EXTI_GetLineIndex(pin), trigger, irqn, preemptPriority, subPriority);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 	F407_EXTI_Init(port, SYS_EXTI_GetLineIndex(pin), trigger, irqn, preemptPriority, subPriority);
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	G3507_EXTI_Init(port, pin, trigger, irqn, preemptPriority, subPriority);
-#else
-	(void)port;
-	(void)pin;
-	(void)trigger;
-	(void)irqn;
-	(void)preemptPriority;
-	(void)subPriority;
-#endif
 }
 
 static uint8_t API_EXTI_CoreIsPendingAndClear(void *port, uint32_t pin)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-	(void)port;
-	return F103_EXTI_IsPendingAndClear(SYS_EXTI_GetLineIndex(pin));
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 	(void)port;
 	return F407_EXTI_IsPendingAndClear(SYS_EXTI_GetLineIndex(pin));
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	return G3507_EXTI_IsPendingAndClear(port, pin);
-#else
-	(void)port;
-	(void)pin;
-	return 0U;
-#endif
 }
 
 static void API_EXTI_DispatchConfig(const API_EXTI_Config_t *config)
@@ -221,7 +184,6 @@ void API_EXTI_HandleIrqByPort(void *port)
 	}
 }
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103) || (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 void EXTI0_IRQHandler(void)
 {
 	API_EXTI_HandleIrqByLine(0U);
@@ -256,31 +218,3 @@ void EXTI15_10_IRQHandler(void)
 {
 	API_EXTI_HandleIrqByLineGroup(10U, 15U);
 }
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-void GROUP1_IRQHandler(void)
-{
-	uint32_t pendingGroup;
-
-	/* 先处理编码器外部中断（独立于 API_EXTI 体系） */
-	G3507_Encoder_ProcessPortIrq(GPIOA);
-	G3507_Encoder_ProcessPortIrq(GPIOB);
-
-	for (;;)
-	{
-		pendingGroup = DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1);
-		if (pendingGroup == DL_INTERRUPT_GROUP1_IIDX_GPIOA)
-		{
-			API_EXTI_HandleIrqByPort(GPIOA);
-			continue;
-		}
-
-		if (pendingGroup == DL_INTERRUPT_GROUP1_IIDX_GPIOB)
-		{
-			API_EXTI_HandleIrqByPort(GPIOB);
-			continue;
-		}
-
-		break;
-	}
-}
-#endif

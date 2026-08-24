@@ -14,10 +14,10 @@
 
 typedef const struct I2C_HAL_Ops
 {
-	void (*Init)(void *sclPort, uint32_t sclPin, uint32_t sclIomux,
-	             void *sdaPort, uint32_t sdaPin, uint32_t sdaIomux);
-	void (*SelectBus)(void *sclPort, uint32_t sclPin, uint32_t sclIomux,
-	                  void *sdaPort, uint32_t sdaPin, uint32_t sdaIomux);
+	void (*Init)(void *sclPort, uint32_t sclPin,
+	             void *sdaPort, uint32_t sdaPin);
+	void (*SelectBus)(void *sclPort, uint32_t sclPin,
+	                  void *sdaPort, uint32_t sdaPin);
 
 	void     (*Start)(void);
 	void     (*Stop)(void);

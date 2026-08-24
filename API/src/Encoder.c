@@ -16,22 +16,6 @@ static const API_Encoder_Config_t *s_encoderTable;
 static uint8_t                      s_encoderCount;
 static uint8_t                      s_encoderInited[API_ENCODER_MAX_ID + 1U];
 
-/*
- * Core 层条件编译分发
- */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-static void API_Encoder_CoreInit(uint8_t coreId,
-                                 void *portA, uint32_t pinA,
-                                 void *portB, uint32_t pinB)
-{
-	F103_Encoder_Init(coreId, portA, pinA, portB, pinB);
-}
-
-static int16_t API_Encoder_CoreGetCount(uint8_t coreId)
-{
-	return F103_Encoder_GetCount(coreId);
-}
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 static void API_Encoder_CoreInit(uint8_t coreId,
                                  void *portA, uint32_t pinA,
                                  void *portB, uint32_t pinB)
@@ -43,37 +27,6 @@ static int16_t API_Encoder_CoreGetCount(uint8_t coreId)
 {
 	return F407_Encoder_GetCount(coreId);
 }
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-static void API_Encoder_CoreInit(uint8_t coreId,
-                                 void *portA, uint32_t pinA,
-                                 void *portB, uint32_t pinB)
-{
-	G3507_Encoder_SetPins(coreId, portA, pinA, portB, pinB);
-	G3507_Encoder_Init(coreId);
-}
-
-static int16_t API_Encoder_CoreGetCount(uint8_t coreId)
-{
-	return G3507_Encoder_GetCount(coreId);
-}
-#else
-static void API_Encoder_CoreInit(uint8_t coreId,
-                                 void *portA, uint32_t pinA,
-                                 void *portB, uint32_t pinB)
-{
-	(void)coreId;
-	(void)portA;
-	(void)pinA;
-	(void)portB;
-	(void)pinB;
-}
-
-static int16_t API_Encoder_CoreGetCount(uint8_t coreId)
-{
-	(void)coreId;
-	return 0;
-}
-#endif
 
 static uint8_t API_Encoder_IsValidId(API_Encoder_Id_t id)
 {

@@ -55,8 +55,8 @@ static const API_USART_Config_t s_usartTable[] =
 /*************************** I2C/SPI协议配置层 ************************/
 /*******************************I2C***********************************/
 /* I2C 配置表：把 HW_I2C_MAP 展开成 API_I2C_Config_t。 */
-#define ENROLL_I2C_ITEM(id, sclPort, sclPin, sdaPort, sdaPin, sclIomux, sdaIomux) \
-	{ id, sclPort, sclPin, sclIomux, sdaPort, sdaPin, sdaIomux },
+#define ENROLL_I2C_ITEM(id, sclPort, sclPin, sdaPort, sdaPin) \
+	{ id, sclPort, sclPin, sdaPort, sdaPin },
 
 static const API_I2C_Config_t s_i2cTable[] =
 {
@@ -66,8 +66,8 @@ static const API_I2C_Config_t s_i2cTable[] =
 
 /*******************************SPI***********************************/
 /* SPI 配置表：把 HW_SPI_MAP 展开成 API_SPI_Config_t。 */
-#define ENROLL_SPI_ITEM(id, csPort, csPin, sckPort, sckPin, mosiPort, mosiPin, misoPort, misoPin, csIomux, sckIomux, mosiIomux, misoIomux) \
-	{ id, csPort, csPin, csIomux, sckPort, sckPin, sckIomux, mosiPort, mosiPin, mosiIomux, misoPort, misoPin, misoIomux },
+#define ENROLL_SPI_ITEM(id, csPort, csPin, sckPort, sckPin, mosiPort, mosiPin, misoPort, misoPin) \
+	{ id, csPort, csPin, sckPort, sckPin, mosiPort, mosiPin, misoPort, misoPin },
 
 static const API_SPI_Config_t s_spiTable[] =
 {

@@ -62,8 +62,8 @@ void API_I2C_Register(const API_I2C_Config_t *configTable, uint8_t count)
 	{
 		s_activeBusId = (API_I2C_BusId_t)configTable[0].id;
 		I2C_OPS_CALL_VOID(Init,
-		                  configTable[0].sclPort, configTable[0].sclPin, configTable[0].sclIomux,
-		                  configTable[0].sdaPort, configTable[0].sdaPin, configTable[0].sdaIomux);
+		                  configTable[0].sclPort, configTable[0].sclPin,
+		                  configTable[0].sdaPort, configTable[0].sdaPin);
 	}
 	else
 	{
@@ -83,8 +83,8 @@ void API_I2C_SelectBus(API_I2C_BusId_t busId)
 	{
 		s_activeBusId = busId;
 		I2C_OPS_CALL_VOID(SelectBus,
-		                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
-		                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
+		                  cfg->sclPort, cfg->sclPin,
+		                  cfg->sdaPort, cfg->sdaPin);
 	}
 
 	/* 总线切换后恢复默认延时 */
@@ -141,8 +141,8 @@ void API_I2C_Init(void)
 	{
 		const API_I2C_Config_t *cfg = &s_i2cTable[i];
 		I2C_OPS_CALL_VOID(Init,
-		                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
-		                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
+		                  cfg->sclPort, cfg->sclPin,
+		                  cfg->sdaPort, cfg->sdaPin);
 	}
 
 	/* 恢复活跃总线 */
@@ -151,8 +151,8 @@ void API_I2C_Init(void)
 		if (cfg != 0)
 		{
 			I2C_OPS_CALL_VOID(Init,
-			                  cfg->sclPort, cfg->sclPin, cfg->sclIomux,
-			                  cfg->sdaPort, cfg->sdaPin, cfg->sdaIomux);
+			                  cfg->sclPort, cfg->sclPin,
+			                  cfg->sdaPort, cfg->sdaPin);
 		}
 	}
 

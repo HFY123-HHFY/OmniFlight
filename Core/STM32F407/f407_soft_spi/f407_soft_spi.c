@@ -56,16 +56,11 @@ static void f407_spi_init_input(F407_GPIO_Regs_t *reg, uint32_t pin)
 
 /* ===================== HAL 接口实现 ===================== */
 
-void soft_spi_hal_init(void *csPort, uint32_t csPin, uint32_t csIomux,
-                       void *sckPort, uint32_t sckPin, uint32_t sckIomux,
-                       void *mosiPort, uint32_t mosiPin, uint32_t mosiIomux,
-                       void *misoPort, uint32_t misoPin, uint32_t misoIomux)
+void soft_spi_hal_init(void *csPort, uint32_t csPin,
+                       void *sckPort, uint32_t sckPin,
+                       void *mosiPort, uint32_t mosiPin,
+                       void *misoPort, uint32_t misoPin)
 {
-	(void)csIomux;
-	(void)sckIomux;
-	(void)mosiIomux;
-	(void)misoIomux;
-
 	s_csReg   = (F407_GPIO_Regs_t *)csPort;
 	s_sckReg  = (F407_GPIO_Regs_t *)sckPort;
 	s_mosiReg = (F407_GPIO_Regs_t *)mosiPort;

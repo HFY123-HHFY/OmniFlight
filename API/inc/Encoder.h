@@ -11,18 +11,10 @@ extern "C" {
  * API Encoder 层职责：
  * 1) 提供统一的编码器接口（读速度）；
  * 2) 通过条件编译分发到 Core 层实现；
- * 3) 底层差异：F103/F407 用定时器编码器模式，G3507 用外部中断模拟。
+ * 3) 底层使用定时器编码器模式。
  */
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "f103_Encoder.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #include "f407_Encoder.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_Encoder.h"
-#else
-#error "Unsupported ENROLL_MCU_TARGET."
-#endif
 
 /* 逻辑编码器 ID */
 typedef enum
@@ -44,25 +36,14 @@ extern int16_t Encoder2_Speed;
 
 /*
  * Core 编码器 ID：
- * F103: 用 TIM 编号（TIM2=1, TIM3=2, TIM4=3）区分
  * F407: 用 TIM 编号（TIM1=0, TIM2=1, TIM3=2, TIM4=3, TIM5=4, TIM8=5）区分
- * G3507: 用编码器序号（0/1）区分
  */
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#define API_ENCODER_CORE_TIM2  (1U)
-#define API_ENCODER_CORE_TIM3  (2U)
-#define API_ENCODER_CORE_TIM4  (3U)
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #define API_ENCODER_CORE_TIM1  (0U)
 #define API_ENCODER_CORE_TIM2  (1U)
 #define API_ENCODER_CORE_TIM3  (2U)
 #define API_ENCODER_CORE_TIM4  (3U)
 #define API_ENCODER_CORE_TIM5  (4U)
 #define API_ENCODER_CORE_TIM8  (5U)
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#define API_ENCODER_CORE_ENC0  (0U)
-#define API_ENCODER_CORE_ENC1  (1U)
-#endif
 
 /*
  * 编码器配置表项：

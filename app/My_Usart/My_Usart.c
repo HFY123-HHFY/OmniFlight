@@ -1,8 +1,5 @@
 #include "My_Usart.h"
 #include <sys/stat.h>
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "ti/driverlib/dl_uart_main.h"
-#endif
 
 /*
  * 发送环形队列结构：
@@ -80,7 +77,6 @@ static USART_RxAsyncQueue *usart_get_rx_queue(USART_TypeDef *USARTx)
 	return 0;
 }
 
-#if (ENROLL_MCU_TARGET != ENROLL_MCU_G3507)
 /* 进入临界区：返回进入前 PRIMASK 状态。 */
 static uint32_t usart_enter_critical(void)
 {
@@ -99,7 +95,6 @@ static void usart_exit_critical(uint32_t primask)
 		__asm volatile("cpsie i" : : : "memory");
 	}
 }
-#endif
 
 /* 统一映射：API 串口 ID -> USART 寄存器实例。 */
 static USART_TypeDef *usart_id_to_instance(API_USART_Id_t id)
@@ -119,7 +114,6 @@ static USART_TypeDef *usart_id_to_instance(API_USART_Id_t id)
 	return 0;
 }
 
-#if (ENROLL_MCU_TARGET != ENROLL_MCU_G3507)
 static void usart_enable_tx_irq(USART_TypeDef *USARTx)
 {
 	USARTx->CR1 |= USART_CR1_TXEIE;
@@ -147,64 +141,24 @@ static uint8_t usart_is_tx_ready(USART_TypeDef *USARTx)
 	}
 	return 0U;
 }
-#else
-static void usart_disable_tx_irq(USART_TypeDef *USARTx)
-{
-	DL_UART_Main_disableInterrupt((UART_Regs *)USARTx, DL_UART_MAIN_INTERRUPT_TX);
-}
-
-static uint8_t usart_is_tx_irq_enabled(USART_TypeDef *USARTx)
-{
-	if (DL_UART_Main_getEnabledInterruptStatus((UART_Regs *)USARTx, DL_UART_MAIN_INTERRUPT_TX) != 0U)
-	{
-		return 1U;
-	}
-	return 0U;
-}
-
-static uint8_t usart_is_tx_ready(USART_TypeDef *USARTx)
-{
-	if (DL_UART_Main_isTXFIFOFull((UART_Regs *)USARTx) == 0U)
-	{
-		return 1U;
-	}
-	return 0U;
-}
-#endif
 
 static uint8_t usart_is_rx_ready(USART_TypeDef *USARTx)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	if (DL_UART_Main_isRXFIFOEmpty((UART_Regs *)USARTx) == 0U)
-	{
-		return 1U;
-	}
-	return 0U;
-#else
 	if ((USARTx->SR & USART_SR_RXNE) != 0U)
 	{
 		return 1U;
 	}
 	return 0U;
-#endif
 }
 
 static uint32_t usart_read_data(USART_TypeDef *USARTx)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	return DL_UART_Main_receiveData((UART_Regs *)USARTx);
-#else
 	return USARTx->DR;
-#endif
 }
 
 static void usart_write_data(USART_TypeDef *USARTx, uint8_t data)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	DL_UART_Main_transmitData((UART_Regs *)USARTx, (uint32_t)data);
-#else
 	USARTx->DR = data;
-#endif
 }
 
 /* 全局接收解析状态。 */
@@ -264,15 +218,9 @@ void usart_send_byte(USART_TypeDef *USARTx, uint8_t Byte)
 /*
  * 异步发送 1 字节：
  * - STM32: 成功入队后由 TXE 中断搬运发送；
- * - G3507: 先统一走阻塞发送链路，返回 0 触发兜底。
  */
 uint8_t usart_send_byte_async(USART_TypeDef *USARTx, uint8_t Byte)
 {
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-	(void)USARTx;
-	(void)Byte;
-	return 0U; /* G3507 不使用异步 TX 队列，统一走 API_USART_WriteByte 阻塞发送 */
-#else
 	uint32_t primask;
 	uint16_t next_head;
 	USART_TxAsyncQueue *q;
@@ -308,7 +256,6 @@ uint8_t usart_send_byte_async(USART_TypeDef *USARTx, uint8_t Byte)
 
 	usart_exit_critical(primask);
 	return 1U;
-#endif
 }
 
 /* 发送 C 字符串（逐字节调用 usart_send_byte）。 */
@@ -469,7 +416,6 @@ void usart_printf(USART_TypeDef *USARTx, const char *format, ...)
 /*
  * TXE 中断服务分发函数：
  * - STM32: 队列有数据时写 DR，空时关闭 TXEIE；
- * - G3507: 当前不使用此路径，保留空实现避免上层改动。
  */
 void usart_tx_irq_handler(USART_TypeDef *USARTx)
 {

@@ -16,10 +16,10 @@
  */
 
 /* GPIO 引脚一次性初始化并预计算全部寄存器缓存值。 */
-void soft_spi_hal_init(void *csPort, uint32_t csPin, uint32_t csIomux,
-                       void *sckPort, uint32_t sckPin, uint32_t sckIomux,
-                       void *mosiPort, uint32_t mosiPin, uint32_t mosiIomux,
-                       void *misoPort, uint32_t misoPin, uint32_t misoIomux);
+void soft_spi_hal_init(void *csPort, uint32_t csPin,
+                       void *sckPort, uint32_t sckPin,
+                       void *mosiPort, uint32_t mosiPin,
+                       void *misoPort, uint32_t misoPin);
 
 /* 写 CS/SCK/MOSI 电平 (0 或非 0)。 */
 void soft_spi_hal_w_cs(uint8_t bit);

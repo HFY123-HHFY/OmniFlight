@@ -76,13 +76,10 @@ static void f407_pin_init_output(F407_GPIO_Regs_t *reg, uint32_t pin)
 
 /* ===================== HAL 接口实现 ===================== */
 
-void soft_i2c_hal_init(void *sclPort, uint32_t sclPin, uint32_t sclIomux,
-                       void *sdaPort, uint32_t sdaPin, uint32_t sdaIomux)
+void soft_i2c_hal_init(void *sclPort, uint32_t sclPin,
+                       void *sdaPort, uint32_t sdaPin)
 {
 	uint32_t idx;
-
-	(void)sclIomux;
-	(void)sdaIomux;
 
 	s_sclReg = (F407_GPIO_Regs_t *)sclPort;
 	s_sdaReg = (F407_GPIO_Regs_t *)sdaPort;

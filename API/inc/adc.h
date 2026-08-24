@@ -7,15 +7,7 @@
 extern "C" {
 #endif
 
-#if (ENROLL_MCU_TARGET == ENROLL_MCU_F103)
-#include "f103_adc.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_F407)
 #include "f407_adc.h"
-#elif (ENROLL_MCU_TARGET == ENROLL_MCU_G3507)
-#include "G3507_adc.h"
-#else
-#error "Unsupported ENROLL_MCU_TARGET."
-#endif
 
 typedef enum
 {

@@ -124,10 +124,9 @@ static void clear_flags(void)
  * Ops 实现
  * =================================================================== */
 
-static void hw_init(void *sclPort, uint32_t sclPin_, uint32_t sclIomux,
-                    void *sdaPort, uint32_t sdaPin_, uint32_t sdaIomux)
+static void hw_init(void *sclPort, uint32_t sclPin_,
+                    void *sdaPort, uint32_t sdaPin_)
 {
-	(void)sclIomux; (void)sdaIomux;
 	I2C     = I2C1;
 	sclGpio = (F407_GPIO_Regs_t *)sclPort;
 	sdaGpio = (F407_GPIO_Regs_t *)sdaPort;
@@ -144,9 +143,8 @@ static void hw_init(void *sclPort, uint32_t sclPin_, uint32_t sclIomux,
 	I2C->CR1 = CR1_PE;
 }
 
-static void hw_select(void *sp, uint32_t sP, uint32_t sI, void *dp, uint32_t dP, uint32_t dI)
+static void hw_select(void *sp, uint32_t sP, void *dp, uint32_t dP)
 {
-	(void)sI; (void)dI;
 	/* 只更新引脚引用，不重初始化 — hw_init 已在系统启动时完成 */
 	I2C     = I2C1;
 	sclGpio = (F407_GPIO_Regs_t *)sp;

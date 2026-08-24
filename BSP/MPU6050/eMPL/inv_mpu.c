@@ -2933,7 +2933,7 @@ uint8_t mpu_dmp_init(void)
 
         /*
          * DMP 使能后给传感器和 FIFO 一个稳定窗口。
-         * G3507 上首包更容易偏慢，增加延时和 FIFO 复位可提升首帧成功率。
+         * 首包可能偏慢，增加延时和 FIFO 复位可提升首帧成功率。
          */
         mpu_reset_fifo();
         Delay_ms(MPU6050_DMP_STARTUP_DELAY_MS);
