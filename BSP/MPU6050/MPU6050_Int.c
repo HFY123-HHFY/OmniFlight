@@ -1,5 +1,6 @@
 #include "MPU6050_Int.h"
 #include "MPU6050.h"
+#include "Control_Task/Control_Task.h"
 
 /*
     * MPU6050 外部中断处理代码
@@ -56,4 +57,5 @@ void MPU6050_EXTI_Callback(API_EXTI_Id_t id, void *userData)
 	(void)id;
 	(void)userData;
 	mpu_flag = 1U;
+	ControlTask_NotifyMpuIsr();  /* 通知 SensorTask 读传感器 */
 }

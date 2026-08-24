@@ -1,152 +1,317 @@
 #include "Control_Task.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+
 #include "tim.h"
 #include "usart.h"
 #include "My_Usart/My_Usart.h"
 #include "Control/Control.h"
-#include "Dshot.h"
-#include "Motor.h"
-#include "MPU6050.h"
 #include "IMU.h"
+#include "MPU6050.h"
+#include "MPU6050_Int.h"
+#include "Motor.h"
+#include "NRF24L01.h"
+
+/* ────────────────────────────────────────────────────────────────
+ * FreeRTOS 钩子函数（应用层，由内核回调）
+ * ──────────────────────────────────────────────────────────────── */
+
+/*
+ * vApplicationStackOverflowHook — 栈溢出检测钩子（configCHECK_FOR_STACK_OVERFLOW=2）
+ * 被调用时任务已严重损坏，唯一能做的：关闭所有中断 + 死循环，方便调试器检查。
+ */
+void vApplicationStackOverflowHook( TaskHandle_t xTask, char * pcTaskName )
+{
+	(void)xTask;
+	(void)pcTaskName;
+	__asm volatile( "cpsid i" );
+	for ( ;; ) { }
+}
+
+/*
+ * vApplicationMallocFailedHook — 堆分配失败钩子（configUSE_MALLOC_FAILED_HOOK=1）
+ * heap_4 内存不足时调用，死循环便于调试定位。
+ */
+void vApplicationMallocFailedHook( void )
+{
+	__asm volatile( "cpsid i" );
+	for ( ;; ) { }
+}
 #include "STP23L.h"
+#include "LED.h"
+#include "KEY.h"
 
-/* =========================================================================
- * 任务标志位
+/* ────────────────────────────────────────────────────────────────
+ * RTOS 对象
+ * ──────────────────────────────────────────────────────────────── */
+static SemaphoreHandle_t xControlSem;      /* TIM3 → ControlTask (500Hz) */
+static SemaphoreHandle_t xMpuSem;          /* EXTI → SensorTask (200Hz) */
+static SemaphoreHandle_t xAttitudeMutex;   /* 姿态数据互斥锁（SensorTask 写 / ControlTask 读） */
+static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交织） */
+
+/* ────────────────────────────────────────────────────────────────
+ * 全局变量
+ * ──────────────────────────────────────────────────────────────── */
+uint32_t Timer_Bsp_t = 0U;   /* 程序运行时间戳（s），由 HealthTask 每秒递增 */
+
+/* 旧标志位（保留兼容，原裸机主循环轮询，RTOS 任务不再使用） */
+volatile uint8_t nrf_task_flag   = 0U;
+volatile uint8_t print_task_flag = 0U;
+
+/* ────────────────────────────────────────────────────────────────
+ * 串口打印开关：起飞前设 0 关闭所有 printf
+ * ──────────────────────────────────────────────────────────────── */
+#define DEBUG_PRINT_ENABLE  1U
+
+/* ────────────────────────────────────────────────────────────────
+ * ControlTask — 500Hz 姿态控制（最高优先级 6）
  *
- * 全部由定时器 ISR 置位（1），主循环消费后清零（0）。
- * 统一模式：ISR 管时间 → 置标志 → 主循环管执行
- * ========================================================================= */
+ * TIM3 每 2ms 给一次信号量 → 500Hz 控制节拍。
+ * 业务逻辑（原 TIM1 ISR 内容）：
+ *   1) 读姿态共享数据（互斥锁保护）；
+ *   2) IMU 偏航陀螺积分；
+ *   3) 已解锁 → 串级 PID + 混控 + DShot 输出；
+ *      未解锁 → Motor_Test（电机掉电保护状态机）。
+ * ──────────────────────────────────────────────────────────────── */
+static void ControlTask(void *pvParameters)
+{
+	(void)pvParameters;
 
-/* 程序运行的时间戳（s），TIM2 每 1s 递增 */
-uint32_t Timer_Bsp_t = 0;
+	for (;;)
+	{
+		/* 阻塞等 TIM3 500Hz 节拍（永不超时） */
+		xSemaphoreTake(xControlSem, portMAX_DELAY);
 
-/* TIM2 分发：慢速外设任务 */
-volatile uint8_t nrf_task_flag   = 0U;   /* 100Hz NRF24L01 遥控通信 */
-// volatile uint8_t qmc_task_flag   = 0U;   /* 50Hz  QMC5883P 磁力计   */
-// volatile uint8_t bmp_task_flag   = 0U;   /* 20Hz  BMP280 气压计     */
-volatile uint8_t print_task_flag = 0U;   /* 10Hz  串口打印          */
+		/* ── 读姿态共享数据（互斥锁保护，保持快照一致性）── */
+		xSemaphoreTake(xAttitudeMutex, portMAX_DELAY);
+		float pitch = Pitch;
+		float roll  = Roll;
+		short gz    = gyroz;
+		xSemaphoreGive(xAttitudeMutex);
 
-/* =========================================================================
- * Control_Task1_Callback — TIM1 (TIM3) 1ms ISR
+		/* 陀螺 Z 轴积分 + 互补滤波（500Hz，与裸机一致） */
+		IMU_Yaw_IntegrateGyro((float)gz / GYRO_SENS_2000DPS, 0.002f);
+
+		/* PID 控制 / 电机测试 */
+		if (Key == 1U)
+		{
+			PID_Pitch_Roll_Combined(pitch, roll);
+		}
+		else
+		{
+			Motor_Test();
+		}
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * SensorTask — 200Hz 读 MPU6050 DMP + 陀螺 + 加速度（优先级 5）
  *
- * 职责：飞控心脏节拍
- *   - PID 控制 + 电机输出：500Hz（每 2ms）
- * 
- * ========================================================================= */
+ * MPU6050 EXTI 给信号量 → 读传感器（I2C，必须在任务里跑，不在 ISR 里跑 I2C）。
+ * 读完后用互斥锁一次性提交到全局姿态变量，保证 ControlTask 读到完整快照。
+ * ──────────────────────────────────────────────────────────────── */
+static void SensorTask(void *pvParameters)
+{
+	(void)pvParameters;
+
+	float  p, r, y;
+	short  gx, gy, gz;
+	short  ax, ay, az;
+
+	for (;;)
+	{
+		/* 阻塞等 MPU6050 EXTI 200Hz 信号量 */
+		xSemaphoreTake(xMpuSem, portMAX_DELAY);
+
+		/* 读传感器到局部变量（I2C 事务，不在互斥锁内） */
+		mpu_dmp_get_data(&p, &r, &y);
+		MPU_Get_Gyroscope(&gx, &gy, &gz);
+		MPU_Get_Accelerometer(&ax, &ay, &az);
+
+		/* 一次性提交到全局变量（互斥锁保护，临界区极短） */
+		xSemaphoreTake(xAttitudeMutex, portMAX_DELAY);
+		Pitch  = p;   Roll   = r;  Yaw   = y;
+		gyrox  = gx;  gyroy  = gy; gyroz = gz;
+		aacx   = ax;  aacy   = ay; aacz  = az;
+		xSemaphoreGive(xAttitudeMutex);
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * LidarTask — STP-23L 激光雷达协议解析（优先级 4）
+ *
+ * 非阻塞轮询，2ms 周期消费 ISR 入队的字节（STP23L_RxPush 由 USART ISR 调用）。
+ * 解析成功后自动刷新 stp23l_distance 等全局输出。
+ * ──────────────────────────────────────────────────────────────── */
+static void LidarTask(void *pvParameters)
+{
+	(void)pvParameters;
+
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+
+	for (;;)
+	{
+		xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
+		STP23L_Task();
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * RadioTask — 100Hz NRF24L01 遥控 + 遥测（优先级 3）
+ * ──────────────────────────────────────────────────────────────── */
+static void RadioTask(void *pvParameters)
+{
+	(void)pvParameters;
+
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+
+	for (;;)
+	{
+		xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(10));
+		NRF24L01_Data();
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * TelemetryTask — 10Hz 串口打印（优先级 2）
+ *
+ * printf 被 xPrintMutex 保护，允许多任务打印不交织。
+ * DEBUG_PRINT_ENABLE=0 时跳过打印，只休眠。
+ * ──────────────────────────────────────────────────────────────── */
+static void TelemetryTask(void *pvParameters)
+{
+	(void)pvParameters;
+
+	TickType_t xLastWakeTime = xTaskGetTickCount();
+
+	for (;;)
+	{
+		xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(100));
+
+#if (DEBUG_PRINT_ENABLE == 1U)
+		xSemaphoreTake(xPrintMutex, portMAX_DELAY);
+
+		/* STP-23L 激光雷达距离 */
+		usart_printf(USART2, "STP: %.3fm %dmm f=%lu rx=%lu\r\n",
+			(double)stp23l_distance, (int)stp23l_distance_mm,
+			(unsigned long)stp23l_frame_cnt);
+
+		/* 调试用（按下文注释掉）：
+		// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", ...);
+		// usart_printf(USART3, "alt: %.1f ...\r\n", ...);
+		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
+		// usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", ...);
+		*/
+
+		xSemaphoreGive(xPrintMutex);
+#endif
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * HealthTask — 1Hz 时间戳 + LED 心跳（优先级 1，最低用户任务）
+ * ──────────────────────────────────────────────────────────────── */
+static void HealthTask(void *pvParameters)
+{
+	(void)pvParameters;
+
+	for (;;)
+	{
+		vTaskDelay(pdMS_TO_TICKS(1000));
+		Timer_Bsp_t++;
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Control_Task_RTOSInit — 创建所有 RTOS 对象
+ *
+ * 必须在 main() 中硬件外设启动前调用，确保 ISR 给信号量时对象已存在。
+ * ──────────────────────────────────────────────────────────────── */
+void Control_Task_RTOSInit(void)
+{
+	/* 创建信号量（初始为 0，由 ISR 给） */
+	xControlSem = xSemaphoreCreateBinary();
+	xMpuSem     = xSemaphoreCreateBinary();
+
+	/* 创建互斥锁（优先级继承，防止翻转） */
+	xAttitudeMutex = xSemaphoreCreateMutex();
+	xPrintMutex    = xSemaphoreCreateMutex();
+
+	/* 创建任务（栈深度单位：字 = 4 字节） */
+	xTaskCreate(ControlTask,    "Control",  512, NULL, 6, NULL);
+	xTaskCreate(SensorTask,     "Sensor",   512, NULL, 5, NULL);
+	xTaskCreate(LidarTask,      "Lidar",    256, NULL, 4, NULL);
+	xTaskCreate(RadioTask,      "Radio",    256, NULL, 3, NULL);
+	xTaskCreate(TelemetryTask,  "Telem",    256, NULL, 2, NULL);
+	xTaskCreate(HealthTask,     "Health",   256, NULL, 1, NULL);
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * ISR 回调（由 main.c 注册到 Enroll/API 层）
+ * ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Control_Task1_Callback — TIM3 1ms ISR
+ *
+ * 每 2ms = 500Hz 给 xControlSem 信号量，唤醒 ControlTask。
+ * 使用 2ms 分频器（与裸机 TIM3 ISR 中的 pid_2ms_tick 一致）。
+ */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
-	static uint8_t  pid_2ms_tick = 0U;
+	static uint8_t div = 0U;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
 	if (id != API_TIM1)
 	{
 		return;
 	}
 
-	pid_2ms_tick++;
-
-	if (pid_2ms_tick >= 2U)
-	{
-		pid_2ms_tick = 0U;
-		/* IMU 偏航融合：陀螺积分 (500Hz) */
-		IMU_Yaw_IntegrateGyro((float)gyroz / GYRO_SENS_2000DPS, 0.002f);
-		if (Key == 1)
-		{
-			PID_Pitch_Roll_Combined(Pitch, Roll);  /* PID → 混控 → DShot_Write */
-		}
-		else
-		{
-			Motor_Test();  /* 未解锁时仍走电机状态机（处理掉电缓降） */
-		}
-	}
-}
-
-/* =========================================================================
- * Control_Task2_Callback — TIM2 1ms ISR
- *
- * 职责：所有非飞控周期任务的统一调度中心
- *
- *   1000ms → Timer_Bsp_t++     (1Hz  时间戳)
- *    100ms → print_task_flag   (10Hz 串口打印)
- *     50ms → bmp_task_flag     (20Hz 气压计)
- *     20ms → qmc_task_flag     (50Hz 磁力计)
- *     10ms → nrf_task_flag     (100Hz 遥控通信)
- *
- * 所有计数器和标志位集中在此，改频率只需改这若干个数字。
- * ========================================================================= */
-void Control_Task2_Callback(API_TIM_Id_t id)
-{
-	static uint8_t nrf_tick    = 0U;
-	// static uint8_t qmc_tick    = 0U;
-	// static uint8_t bmp_tick    = 0U;
-	static uint8_t printf_tick = 0U;
-	static uint16_t time_t     = 0U;
-
-	if (id != API_TIM2)
+	if (xControlSem == NULL)
 	{
 		return;
 	}
 
-	/* ---- NRF24L01: 100Hz (每 10ms) ---- */
-	nrf_tick++;
-	if (nrf_tick >= 10U)
+	div++;
+
+	if (div >= 2U)
 	{
-		nrf_tick = 0U;
-		nrf_task_flag = 1U;
-	}
-
-	/* ---- QMC5883P: 50Hz (每 20ms) ---- */
-	// qmc_tick++;
-	// if (qmc_tick >= 20U)
-	// {
-	// 	qmc_tick = 0U;
-	// 	qmc_task_flag = 1U;
-	// }
-
-	/* ---- BMP280: 20Hz (每 50ms) ---- */
-	// bmp_tick++;
-	// if (bmp_tick >= 50U)
-	// {
-	// 	bmp_tick = 0U;
-	// 	bmp_task_flag = 1U;
-	// }
-
-	/* ---- printf: 10Hz (每 100ms) ---- */
-	printf_tick++;
-	if (printf_tick >= 100U)
-	{
-		printf_tick = 0U;
-		print_task_flag = 1U;
-	}
-
-	/* ---- 时间戳: 1Hz (每 1000ms) ---- */
-	time_t++;
-	if (time_t >= 1000U)
-	{
-		time_t = 0U;
-		Timer_Bsp_t++;
+		div = 0U;
+		xSemaphoreGiveFromISR(xControlSem, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 	}
 }
 
-/* =========================================================================
- * Control_Task_USART_Callback — USART 中断回调（所有 USART 共用入口）
+/*
+ * ControlTask_NotifyMpuIsr — 由 MPU6050 EXTI 回调调用
  *
- * 职责：
- *   1) TX 队列排空（异步 printf 的核心）
- *   2) RX 字节读 DR → 按串口 ID 分发到对应 BSP 驱动的入队接口
+ * 给 xMpuSem 信号量，唤醒 SensorTask。
+ * 调用上下文：MPU6050_EXTI_Callback（ISR，优先级 6，可调 FromISR）。
+ */
+void ControlTask_NotifyMpuIsr(void)
+{
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+	if (xMpuSem != NULL)
+	{
+		xSemaphoreGiveFromISR(xMpuSem, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	}
+}
+
+/*
+ * Control_Task_USART_Callback — USART 中断回调（所有 USART 共用）
  *
- * ★ ISR 只做硬件搬运 + 入队，协议解析留给主循环
- *
- * 此回调必须注册（Enroll_USART_RegisterIrqHandler），否则 TXE 中断会无限循环。
- * ========================================================================= */
+ * 保持 FreeRTOS 不感知（USART 优先级 4 < configMAX_SYSCALL=5），
+ * 不调用任何 FreeRTOS API。仅做硬件搬运：TX 队列排空 + RX 按串口分发。
+ * 与裸机版本完全一致，无需修改。
+ */
 void Control_Task_USART_Callback(API_USART_Id_t id)
 {
 	uint32_t data;
 	uint8_t  rxValid;
 
-	/*
-	 * 循环排空 RX：F407 USART 无硬件 FIFO，但 do-while 防止未来移植到
-	 * 有 FIFO 的 MCU 时数据堆积。
-	 */
 	do
 	{
 		data    = 0U;
@@ -155,7 +320,6 @@ void Control_Task_USART_Callback(API_USART_Id_t id)
 
 		if (rxValid != 0U)
 		{
-			/* ── 按串口 ID 分发：只入队，解析交给主循环 Task ── */
 			if (id == API_USART1)
 			{
 				STP23L_RxPush((uint8_t)data);  /* USART1: STP-23L 激光雷达 */

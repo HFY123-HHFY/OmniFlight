@@ -5,95 +5,61 @@
 extern uint32_t SystemCoreClock;
 
 /*
- * F407 参考实现采用 SysTick 时钟源 HCLK/8。
- * facUs: 1us 对应的 SysTick 计数；facMs: 1ms 对应计数。
+ * F407 延时实现 —— 基于 DWT 周期计数器（CYCCNT）。
+ *
+ * 为什么不用 SysTick：
+ *   FreeRTOS 独占 SysTick 作为系统节拍（xPortSysTickHandler）。
+ *   若 Delay 再操作 SysTick->LOAD/CTRL 会破坏 RTOS 节拍，故改用 DWT。
+ *
+ * DWT->CYCCNT 是 Cortex-M4 内核的 32bit 自由运行周期计数器，与 SysTick 完全无关，
+ * 在调度器启动前后均可安全使用。无符号减法天然处理计数器回绕。
  */
-static void F407_GetDelayFactor(uint32_t *facUs, uint32_t *facMs)
+
+/* 惰性初始化：首次调用延时时使能 DWT 的 CYCCNT。 */
+static void F407_DwtInit(void)
 {
-	uint32_t sysclkDiv8;
+	static uint8_t done = 0U;
 
-	sysclkDiv8 = SystemCoreClock / 8U;
-	*facUs = sysclkDiv8 / 1000000U;
-	if (*facUs == 0U)
-	{
-		*facUs = 1U;
-	}
-	*facMs = (*facUs) * 1000U;
-}
-
-/* 单次毫秒延时（受 24bit SysTick LOAD 限制）。 */
-static void F407_DelayXms(uint32_t ms)
-{
-	uint32_t facUs;
-	uint32_t facMs;
-	uint32_t temp;
-
-	if (ms == 0U)
+	if (done != 0U)
 	{
 		return;
 	}
+	done = 1U;
 
-	F407_GetDelayFactor(&facUs, &facMs);
-	SysTick->LOAD = ms * facMs;
-	SysTick->VAL = 0U;
-	SysTick->CTRL = 0x01U;
-	do
-	{
-		temp = SysTick->CTRL;
-	} while (((temp & 0x01U) != 0U) && ((temp & (1U << 16U)) == 0U));
-	SysTick->CTRL = 0U;
-	SysTick->VAL = 0U;
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;  /* 使能 DWT/ITM trace */
+	DWT->CYCCNT = 0U;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;             /* 启动周期计数器 */
 }
 
+/* 微秒级忙等延时。 */
 void Delay_us(uint32_t us)
 {
-	uint32_t facUs;
-	uint32_t facMs;
-	uint32_t temp;
-	uint32_t maxUsPerShot;
+	uint32_t start;
+	uint32_t ticks;
 
 	if (us == 0U)
 	{
 		return;
 	}
 
-	F407_GetDelayFactor(&facUs, &facMs);
-	maxUsPerShot = 0xFFFFFFU / facUs;
-	if (maxUsPerShot == 0U)
-	{
-		maxUsPerShot = 1U;
-	}
+	F407_DwtInit();
+	start = DWT->CYCCNT;
+	ticks = us * (SystemCoreClock / 1000000U);
 
-	while (us > 0U)
+	/* (now - start) 无符号差值，自动跨越 CYCCNT 回绕点 */
+	while ((uint32_t)(DWT->CYCCNT - start) < ticks)
 	{
-		uint32_t thisUs;
-
-		thisUs = (us > maxUsPerShot) ? maxUsPerShot : us;
-		SysTick->LOAD = thisUs * facUs;
-		SysTick->VAL = 0U;
-		SysTick->CTRL = 0x01U;
-		do
-		{
-			temp = SysTick->CTRL;
-		} while (((temp & 0x01U) != 0U) && ((temp & (1U << 16U)) == 0U));
-		SysTick->CTRL = 0U;
-		SysTick->VAL = 0U;
-		us -= thisUs;
 	}
 }
 
+/* 毫秒级忙等延时（分段，留出计数器余量）。 */
 void Delay_ms(uint32_t ms)
 {
-	/* 与常见 F407 参考工程一致：每段 540ms，兼顾超频余量。 */
-	while (ms > 540U)
+	while (ms > 0U)
 	{
-		F407_DelayXms(540U);
-		ms -= 540U;
-	}
-
-	if (ms > 0U)
-	{
-		F407_DelayXms(ms);
+		uint32_t chunk = (ms > 1000U) ? 1000U : ms;
+		Delay_us(chunk * 1000U);
+		ms -= chunk;
 	}
 }
 
