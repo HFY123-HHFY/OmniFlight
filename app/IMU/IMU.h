@@ -30,7 +30,7 @@ void IMU_Init(void);
 void IMU_Yaw_IntegrateGyro(float gyro_z_dps, float dt);
 
 /*
- * 磁力计校正 — 主循环收到新 QMC 数据时调用（~50Hz）。
+ * 磁力计校正 — 任务收到新 QMC 数据时调用（~50Hz）。
  *   mag_heading : QMC 航向角 (0~360 deg)
  */
 void IMU_Yaw_CorrectMag(float mag_heading);
@@ -44,7 +44,7 @@ float IMU_Get_GyroBias(void);
 /* 返回零偏初始化是否完成（完成后才能用 IMU_Get_Yaw）。 */
 uint8_t IMU_IsReady(void);
 
-extern float IMU_Yaw;   /* 外部可见的融合偏航角，主循环更新 */
+extern float IMU_Yaw;   /* 外部可见的融合偏航角，ControlTask 更新 */
 
 #ifdef __cplusplus
 }

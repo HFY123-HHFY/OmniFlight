@@ -77,7 +77,7 @@ int main(void)
 	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200  — 板载调试串口
 	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 无线串口调试
 
-	// IMU_Init();			/* IMU 偏航融合初始化（必须在 TIM1 之前，否则 ISR 用未初始化状态） */
+	// IMU_Init();			/* 可选：IMU 状态重置。静态变量默认已零初始化，ControlTask 会自动开始零偏采集 */
 	API_TIM_Init(API_TIM1, 1U); /* TIM3: 控制节拍，每 1ms → 500Hz 分频给信号量 */
 	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U);
 
@@ -116,10 +116,10 @@ int main(void)
 	PID_Contorl_Init();
 	/* 初始化DShot协议 */
 	DShot_Init();
-	/* 所有外设初始化完成-蜂鸣器初始化 */
-	Buzzer_Init();
 	/* 初始化STP-23L激光雷达协议解析 */
 	STP23L_Init();
+	/* 所有外设初始化完成-蜂鸣器初始化 */
+	Buzzer_Init();
 
 	/*
 	 * 串级PID参数（基于 dt=0.002s，500Hz）

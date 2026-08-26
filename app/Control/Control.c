@@ -1,5 +1,5 @@
 #include "Control.h"
-#include "Control_Task/Control_Task.h"  /* pid_task_flag / nrf_task_flag 等标志位 */
+#include "Delay.h"
 #include "LED.h"
 #include "MPU6050.h"                    /* MPU_Get_Gyroscope */
 #include "My_Usart/My_Usart.h"          /* usart_printf */
@@ -64,10 +64,11 @@ static float GyroRawToDps(short raw, float bias)
  *
  * 上电后调用一次，飞行器必须保持静止。
  *
- * samples: 采样点数。DMP 输出 200Hz，1000 点 ≈ 5 秒。
- * 返回 1 成功，0 超时失败。
+ * samples: 采样点数。固定 5ms 采样节拍 (200Hz)，1000 点 ≈ 5 秒。
+ * 返回 1 完成（采样不再依赖 EXTI 标志，无超时概念）。
  *
- * 注意：调用前必须已完成 mpu_dmp_init() + Enroll_MPU6050_Register()
+ * 注意：调用前必须已完成 mpu_dmp_init()。本函数在调度器启动前调用，
+ *       采样节拍用 Delay_ms（DWT 忙等），不与 RTOS tick 冲突。
  * ========================================================================= */
 uint8_t GyroBias_Calibrate(uint16_t samples, float *gravity_ref_out)
 {
@@ -83,20 +84,8 @@ uint8_t GyroBias_Calibrate(uint16_t samples, float *gravity_ref_out)
 
 	for (i = 0U; i < samples; i++)
 	{
-		uint32_t timeout = 500000U;
-		while (mpu_flag == 0U && timeout > 0U)
-		{
-			timeout--;
-		}
+		Delay_ms(5U);   /* 固定 5ms 采样节拍 = 200Hz，与 DMP 输出率一致 */
 
-		if (timeout == 0U)
-		{
-			usart_printf(USART1, "Gyro calib TIMEOUT at %u/%u\r\n",
-			             (unsigned int)i, (unsigned int)samples);
-			return 0U;
-		}
-
-		mpu_flag = 0U;
 		mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
 		MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);
 		MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
@@ -209,7 +198,7 @@ void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps
  *
  * 调用前提：
  *   - GyroBias_Calibrate() 已完成
- *   - main loop 已清零 pid_task_flag
+ *   - 由 ControlTask 每 500Hz 调用（dt = 0.002s）
  *
  * 数据流：
  *   gyrox/gyroy(原始LSB) → 去偏 → deg/s → 低通 → 内环PID → Motor_Test()

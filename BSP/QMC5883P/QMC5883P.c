@@ -116,7 +116,7 @@ void QMC_GetData(int16_t *magX, int16_t *magY, int16_t *magZ)
  * 校准参数保存在 QMC5883P.h 宏中，断电不丢失。
  *
  * 校准流程:
- *   1. QMC_CAL_ENABLE 设为 1，烧录，把主循环里 QMC_Data() 移到 if 外面全速调用
+ *   1. QMC_CAL_ENABLE 设为 1，烧录，把任务里 QMC_Data() 移到 if 外面全速调用
  *   2. LED3 亮 = 校准进行中，水平旋转飞行器（覆盖 360 度）
  *   3. LED3 灭 = 校准完成，串口打印结果
  *   4. 把打印的四个值填入 QMC5883P.h 的宏

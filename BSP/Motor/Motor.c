@@ -125,7 +125,7 @@ static void Motor_MixWithDesaturation(float base, float pitch, float roll,
 
 /*
  * 电机混控测试函数。
- * 在主循环中周期性调用。
+ * 在控制任务中周期性调用。
  *
  * Key == 1: 解锁运行
  *   - 读取 speed_temp（摇杆油门）+ 角速度 PID 输出

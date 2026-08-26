@@ -21,12 +21,12 @@ float    stp23l_distance    = 0.0f;
 uint16_t stp23l_distance_mm = 0U;
 uint32_t stp23l_frame_cnt   = 0U;
 
-/* ── 内部 RX 环形缓冲区（两层缓冲：ISR → 缓冲区 → 主循环解析） ── */
+/* ── 内部 RX 环形缓冲区（两层缓冲：ISR → 缓冲区 → 任务解析） ── */
 #define STP23L_RX_BUF_SIZE 512U
 
 static uint8_t  s_rx_buf[STP23L_RX_BUF_SIZE];
 static volatile uint16_t s_rx_head;  /* ISR 生产者写入位置 */
-static volatile uint16_t s_rx_tail;  /* 主循环消费者读取位置 */
+static volatile uint16_t s_rx_tail;  /* 任务消费者读取位置 */
 
 /* ── 内部状态机 ──────────────────────────────────────── */
 typedef enum
@@ -93,7 +93,7 @@ void STP23L_RxPush(uint8_t byte)
 static uint8_t STP23L_FeedByte(uint8_t byte);
 
 /*
- * 主循环调用：消费内部缓冲区中所有缓存的字节，
+ * 任务上下文调用：消费内部缓冲区中所有缓存的字节，
  * 逐字节完成协议解析。非阻塞 — 缓冲区空时立即返回。
  */
 void STP23L_Task(void)
@@ -101,7 +101,7 @@ void STP23L_Task(void)
 	uint16_t tail;
 
 	/*
-	 * 用局部变量快照 head，避免主循环每次循环读 volatile。
+	 * 用局部变量快照 head，避免每次循环读 volatile。
 	 * 只在缓冲区非空时才逐字节处理。
 	 */
 	while (s_rx_tail != s_rx_head)

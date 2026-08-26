@@ -64,7 +64,7 @@ void LED_Control(LED_Id_t id, LED_Level_t level);
  * BSP 层单次翻转闪烁：
  * - 高电平保持 periodMs 毫秒；
  * - 低电平保持 periodMs 毫秒；
- * - 单次执行后返回，便于在主循环中反复调用。
+ * - 单次执行后返回，便于在任务中反复调用。
  */
 void LED_Turn(LED_Id_t id, uint32_t periodMs);
 

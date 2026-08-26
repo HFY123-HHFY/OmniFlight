@@ -3,7 +3,7 @@
 
 /*
  * 发送环形队列结构：
- * - head: 生产者写入位置（主循环或任务上下文）
+ * - head: 生产者写入位置（ISR 或任务上下文）
  * - tail: 消费者取出位置（TXE 中断上下文）
  * - asyncReady: 异步 TX 就绪标志。0=未就绪（退化为阻塞发送），1=已就绪（TXE 中断排空队列）。
  *   由 usart_async_tx_init() 或 usart_irq_dispatch_by_id() 首次调用时自动置位。
@@ -43,7 +43,7 @@ static USART_TxAsyncQueue *usart_get_tx_queue(USART_TypeDef *USARTx)
 /*
  * 接收环形队列结构：
  * - head: ISR 生产者写入位置（RXNE 中断上下文）
- * - tail: 主循环消费者取出位置
+ * - tail: 任务消费者取出位置
  * - 单生产者单消费者，队满丢弃新字节，保护已接收数据完整性
  */
 typedef struct
@@ -500,7 +500,7 @@ void usart_irq_dispatch_by_id(API_USART_Id_t id, uint32_t *rxData, uint8_t *rxVa
 }
 
 /*
- * 查询 RX 队列中可读字节数（非阻塞，主循环安全）。
+ * 查询 RX 队列中可读字节数（非阻塞，任务上下文安全）。
  * 返回：当前队列中可供读取的字节数。
  */
 uint16_t usart_rx_available(USART_TypeDef *USARTx)
@@ -527,7 +527,7 @@ uint16_t usart_rx_available(USART_TypeDef *USARTx)
 }
 
 /*
- * 从 RX 队列读取 1 字节（非阻塞，主循环安全）。
+ * 从 RX 队列读取 1 字节（非阻塞，任务上下文安全）。
  * 返回：1=读取成功，*Byte 存放数据；0=队列空。
  */
 uint8_t usart_read_byte(USART_TypeDef *USARTx, uint8_t *Byte)

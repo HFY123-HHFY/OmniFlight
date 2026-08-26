@@ -8,11 +8,11 @@
  * │ 首次磁力计数据直接设 yaw 起点，无需收敛等待          │
  * └─────────────────────────────────────────────────────┘
  *
- * ┌─ 运行阶段 (500Hz TIM1 ISR) ─────────────────────────┐
+ * ┌─ 运行阶段 (500Hz ControlTask) ──────────────────────┐
  * │ yaw += (gyro_z - bias) * dt      陀螺积分，扣零偏    │
  * └─────────────────────────────────────────────────────┘
  *
- * ┌─ 运行阶段 (50Hz 主循环，QMC 数据到达时) ────────────┐
+ * ┌─ 运行阶段 (50Hz 任务，QMC 数据到达时) ──────────────┐
  * │ error = mag - yaw                磁力计与融合值偏差   │
  * │ yaw  += Kp * error               P: 拉向磁力计       │
  * │ bias -= Ki * error               I: 温度漂移在线补偿  │
@@ -22,7 +22,7 @@
  * Ki=0.002@50Hz: 温度漂移在秒级被自动补偿
  */
 
-float IMU_Yaw = 0.0f;   /* 外部可见的融合偏航角，主循环更新 */
+float IMU_Yaw = 0.0f;   /* 外部可见的融合偏航角，ControlTask 更新 */
 
 /* ── 可调参数 ── */
 
@@ -56,7 +56,7 @@ void IMU_Init(void)
 }
 
 /*
- * IMU_Yaw_IntegrateGyro — TIM1 ISR 每 2ms (500Hz) 调用。
+ * IMU_Yaw_IntegrateGyro — ControlTask 每 2ms (500Hz) 调用。
  * 启动阶段：采集 gyro_z 样本计算零偏均值，不积分。
  * 运行阶段：零偏补偿后累加角度增量。
  *
@@ -88,7 +88,7 @@ void IMU_Yaw_IntegrateGyro(float gyro_z_dps, float dt)
 }
 
 /*
- * IMU_Yaw_CorrectMag — 主循环每收到新 QMC 数据时 (50Hz) 调用。
+ * IMU_Yaw_CorrectMag — 任务每收到新 QMC 数据时 (50Hz) 调用。
  * 首次调用直接用磁力计角度初始化起点，之后用 PI 校正。
  *
  *   mag_heading : QMC 航向角 (0~360 deg)，来自 QMC_Data()

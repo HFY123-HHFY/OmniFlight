@@ -10,7 +10,7 @@ static uint8_t s_keyConfigCount;
  */
 static uint8_t Key_Num;
 /* Key：对外暴露的当前最新按键值。
- * 用于主循环或其他模块直接读取按键事件结果。
+ * 用于任务或其他模块直接读取按键事件结果。
  */
 uint8_t Key = 0; /* 按键键值 */
 

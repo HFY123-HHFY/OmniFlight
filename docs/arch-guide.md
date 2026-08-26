@@ -11,10 +11,11 @@
 | **名称** | OmniFlight — 四轴飞控 |
 | **基于框架** | [OmniLayer](https://github.com/HFY123-HHFY/OmniLayer.git) |
 | **主控** | STM32F407VET6 (Cortex-M4 + FPU, 168MHz, 512KB Flash, 128KB RAM) |
+| **RTOS** | FreeRTOS V11.1.0（vendored 至 `Middlewares/FreeRTOS-Kernel`，heap_4） |
 | **构建工具** | CMake + GCC ARM Embedded + OpenOCD |
 | **IDE** | VS Code (CMake + GCC + OpenOCD) |
 | **默认 MCU** | `ENROLL_MCU_F407` (定义于 Enroll/Enroll.h) |
-| **分支** | `main` (裸机飞控主线) |
+| **分支** | `main` (FreeRTOS 实时飞控主线) |
 
 ---
 
@@ -22,13 +23,14 @@
 
 ```
 ┌────────────────────────────────────────┐
-│  A_Entry/main.c  程序入口               │  飞控主循环
+│  A_Entry/main.c  程序入口               │  初始化 → vTaskStartScheduler()
+│  A_Entry/FreeRTOSConfig.h 内核配置      │  中断优先级分区 / 堆 / API 开关
 └────────────────────────────────────────┘
               ↓
 ┌────────────────────────────────────────┐
 │  app/           应用层 — 飞控核心算法   │
 │  Control/       串级PID + 混控 + 陀螺校准│
-│  Control_Task/  中断回调 + 任务标志调度  │
+│  Control_Task/  RTOS 任务 + ISR 回调    │  6 任务调度 + 信号量/互斥锁
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
 │  IMU/           偏航角互补滤波融合       │
@@ -66,7 +68,9 @@
               ↓
 ┌────────────────────────────────────────┐
 │  Drivers/       驱动资源层              │  CMSIS + 启动文件
-│  SYSTEM/        系统层                  │  sys/Delay/BusRate/IrqPriority
+│  SYSTEM/        系统层                  │  sys/Delay(DWT)/BusRate/IrqPriority
+├────────────────────────────────────────┤
+│  Middlewares/FreeRTOS-Kernel/          │  内核源码（vendored，任务/队列/互斥锁）
 └────────────────────────────────────────┘
 ```
 
@@ -101,37 +105,34 @@
 | 电机3 | PE13 | TIM1 CH3 | |
 | 电机4 | PE14 | TIM1 CH4 | |
 | 蜂鸣器 | PB1 | TIM3 CH4 | 2700Hz PWM |
-| USART1 TX/RX | PA9/PA10 | USART1 | 调试 115200 |
-| USART3 TX/RX | PD8/PD9 | USART3 | 无线串口 |
+| USART1 TX/RX | PB6/PB7 | USART1 | STP-23L 激光雷达 230400 |
+| USART2 TX/RX | PD5/PD6 | USART2 | 板载调试 115200 |
+| USART3 TX/RX | PD8/PD9 | USART3 | 无线串口 115200 |
 | LED1/2/3 | PE2/PE3/PE4 | GPIO | 绿/红/蓝 |
 
 ---
 
 ## 5. 飞控核心设计
 
-### 5.1 传感器数据流
+### 5.1 RTOS 任务模型（接管原裸机控制链）
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ TIM1 ISR (500Hz)                                                │
-│   gyroz → IMU_Yaw_IntegrateGyro  陀螺积分更新偏航角               │
-│   (PID_Pitch_Roll_Combined 待启用)                               │
-├─────────────────────────────────────────────────────────────────┤
-│ TIM2 ISR (1ms) → 任务标志调度                                    │
-│   10ms → nrf_task_flag   (100Hz)                                │
-│   20ms → qmc_task_flag   (50Hz)                                 │
-│   50ms → bmp_task_flag   (20Hz)                                 │
-│  100ms → print_task_flag (10Hz)                                 │
-│ 1000ms → Timer_Bsp_t++   (1Hz 时间戳)                            │
-├─────────────────────────────────────────────────────────────────┤
-│ 主循环 — 消费任务标志                                             │
-│   mpu_flag (200Hz)    → DMP Pitch/Roll + gyrox/gyroy/gyroz + aacz │
-│   nrf_task_flag       → NRF24L01_Data() 遥控+遥测                │
-│   qmc_task_flag       → Angle_XY=QMC_Data() → IMU_Yaw_CorrectMag │
-│   bmp_task_flag       → alt=BMP_Data() → Altitude_Update(aacz,alt,0.05s) │
-│   print_task_flag     → usart_printf 传感器数据                   │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ TIM3 ISR (1ms, 优先级5) ─2分频→ xControlSem ──► ControlTask(6)      │
+│   500Hz：读姿态快照 → IMU 偏航积分 → 串级PID → 混控 → DShot          │
+├─────────────────────────────────────────────────────────────────────┤
+│ MPU6050 EXTI (200Hz, 优先级6) → xMpuSem ──► SensorTask(5)           │
+│   200Hz：I2C 读 DMP + 陀螺 + 加速度 → 互斥锁提交姿态全局变量          │
+├─────────────────────────────────────────────────────────────────────┤
+│ LidarTask(4)     2ms 轮询   → STP23L_Task() 协议解析 (USART1 230400) │
+│ RadioTask(3)     10ms 周期  → NRF24L01_Data() 遥控+遥测 (100Hz)      │
+│ TelemetryTask(2) 100ms 周期 → usart_printf（xPrintMutex 保护）       │
+│ HealthTask(1)    1s 周期    → Timer_Bsp_t++ 运行时间戳               │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+任务优先级 6（最高）→ 1（最低），0 为 idle/timer 服务任务。抢占式调度：
+ControlTask 由 TIM3 信号量唤醒后立即抢占所有低优先级任务，保证 500Hz 控制节拍抖动最小。
 
 ### 5.2 串级 PID 架构
 
@@ -148,16 +149,16 @@
 MPU6050 DMP Yaw 存在长期漂移，改用互补滤波：
 
 ```
-yaw += (gyro_z - bias) * dt        ← 陀螺积分 500Hz (TIM1 ISR)
-yaw += Kp * (mag - yaw)            ← 磁力计校正 50Hz (主循环)
+yaw += (gyro_z - bias) * dt        ← 陀螺积分 500Hz (ControlTask)
+yaw += Kp * (mag - yaw)            ← 磁力计校正 50Hz (任务，QMC 数据到达时)
 bias -= Ki * (mag - yaw)           ← 零偏在线补偿
 ```
 
 - Kp=0.15, Ki=0.002
-- 上电 5 秒自动采集 gyro_z 零偏
+- 上电 5 秒自动采集 gyro_z 零偏（ControlTask 内 500Hz×5s=2500 样本）
 - 首次 QMC 数据直达起点，无收敛延迟
 - 输出：`IMU_Yaw` 全局变量 (0~360°)，替代 DMP Yaw
-- `IMU_Init()` 必须在 `API_TIM_Init(TIM1)` 之前调用
+- `IMU_Init()` 可选：静态状态默认已零初始化，ControlTask 首次调用自动开始零偏采集
 
 ### 5.4 高度融合 (Altitude)
 
@@ -170,7 +171,7 @@ pos += Kp * (baro_alt - pos)            ← 气压计 P 校正
 vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
 ```
 
-- Kp=0.4, Ki=0.2, 调用频率 20Hz（bmp_task_flag）
+- Kp=0.4, Ki=0.2, 调用频率 20Hz（BMP 数据到达的任务周期）
 - `gravity_ref` 与陀螺零偏同步采集（同一次 5s 静止），无额外等待
 - 输出：`Alt_Fused` — 融合高度 (m)，钳位 >= 0
 - `Altitude_Init()` 在 `GyroBias_Calibrate` 之后调用，接收重力参考值
@@ -180,11 +181,14 @@ vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
 | 传感器 | 校准方式 | 耗时 | 说明 |
 |--------|----------|:---:|------|
 | MPU6050 Gyro X/Y + 重力参考 | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U, &gravity_ref)` 同步采集 |
-| MPU6050 Gyro Z | IMU 互补滤波在线 PI | ~5s | TIM1 ISR 自动完成 |
+| MPU6050 Gyro Z | IMU 互补滤波在线 PI | ~5s | ControlTask 自动完成 |
 | QMC5883P | 硬铁 offset + 软铁 scale (预存参数) | 瞬间 | `QMC_CAL_ENABLE=0` 使用头文件预存值 |
 | BMP280 | 地面气压归零 + EMA 跟踪 | 5s | `BMP280Init` 内部自动执行 |
 
 总启动时间：约 10 秒（陀螺+重力 5s + BMP 5s）
+
+> RTOS 说明：校准类函数在**调度器启动前**调用，采样节拍用 `Delay_ms`（DWT 忙等，
+> 不与 RTOS tick 冲突），不再依赖 EXTI 标志位轮询。
 
 ### 5.6 DShot300 油门协议
 
@@ -194,21 +198,39 @@ vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
 - 油门范围：48~2047（0 停转，1~47 为保留命令区）
 - **重要**：电调需要从最低油门（48）逐步递增，不可直接跳到大油门值
 
-### 5.7 中断回调架构
+### 5.7 ISR 回调架构
 
-- `Control_Task1_Callback` → TIM1 1ms → pid_2ms_tick (2ms/500Hz) → IMU 积分 + PID
-- `Control_Task2_Callback` → TIM2 1ms → 所有任务标志调度
-- `Control_Task_USART_Callback` → USART1/3 → TX 队列排空 + RX 接收
+ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
-### 5.8 任务标志位一览
+- `Control_Task1_Callback` → TIM3 1ms ISR → 2 分频 → `xSemaphoreGiveFromISR` 唤醒 ControlTask（500Hz）
+- `ControlTask_NotifyMpuIsr` → MPU6050 EXTI ISR → `xSemaphoreGiveFromISR` 唤醒 SensorTask（200Hz）
+- `Control_Task_USART_Callback` → USART1/2/3 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）
 
-| 标志 | 频率 | ISR 源 | 主循环消费 |
-|------|:---:|--------|------------|
-| `mpu_flag` | 200Hz | MPU6050 EXTI | DMP + Gyro 读取 |
-| `nrf_task_flag` | 100Hz | TIM2 | NRF24L01_Data() |
-| `qmc_task_flag` | 50Hz | TIM2 | QMC_Data() → IMU_Yaw_CorrectMag() |
-| `bmp_task_flag` | 20Hz | TIM2 | BMP_Data() → Altitude_Update() |
-| `print_task_flag` | 10Hz | TIM2 | usart_printf |
+### 5.8 RTOS 对象一览
+
+| 任务 | 优先级 | 频率 | 唤醒方式 | 职责 |
+|------|:---:|:---:|----------|------|
+| ControlTask | 6 | 500Hz | xControlSem（TIM3 ISR） | 姿态快照 → IMU 积分 → 串级 PID → 混控 |
+| SensorTask | 5 | 200Hz | xMpuSem（EXTI ISR） | I2C 读 DMP/陀螺/加速度 → 提交全局姿态 |
+| LidarTask | 4 | 2ms 轮询 | xTaskDelayUntil | STP23L_Task 协议解析 |
+| RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
+| TelemetryTask | 2 | 100ms | xTaskDelayUntil | usart_printf 遥测打印 |
+| HealthTask | 1 | 1s | vTaskDelay | Timer_Bsp_t 时间戳 |
+
+| 同步对象 | 类型 | 保护内容 |
+|----------|------|----------|
+| xControlSem | 二值信号量 | TIM3 → ControlTask 500Hz 节拍 |
+| xMpuSem | 二值信号量 | EXTI → SensorTask 200Hz 数据就绪 |
+| xAttitudeMutex | 互斥锁（优先级继承） | Pitch/Roll/Yaw/gyrox/y/z/aacx/y/z（SensorTask 写 / ControlTask 读） |
+| xPrintMutex | 互斥锁 | printf 串口输出防交织 |
+
+### 5.9 FreeRTOS 接管设计要点
+
+- **启动流程**：main 初始化外设 → `Control_Task_RTOSInit()`（信号量/互斥锁/任务必须先于 ISR 源创建）→ `vTaskStartScheduler()` → SVC 启动第一个任务，SysTick/PendSV 移交内核
+- **中断优先级分区**：`configMAX_SYSCALL_INTERRUPT_PRIORITY=5`。USART=4 设为「不感知」（永不被内核临界区屏蔽，异步 TX 零丢包，但严禁调 RTOS API）；TIM3=5、EXTI=6 为「感知」（可调 FromISR API）
+- **同步设计**：ISR → 二值信号量 → 任务；共享姿态数据 → 互斥锁（优先级继承防优先级翻转）；printf → 互斥锁防交织
+- **延时选型**：µs 级 bit-bang 时序（软件 I2C/SPI）用 `Delay_us`（DWT 忙等，任务切换会被阻塞）；任务 ms 级休眠用 `vTaskDelay/xTaskDelayUntil`（让出 CPU）；Delay 已改为 DWT 计数器实现，与 SysTick 解耦
+- **安全钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` + 栈溢出/内存分配失败钩子 → 关中断死循环，方便调试器定位
 
 ---
 
@@ -238,31 +260,33 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 - 标志默认 0（安全），注册中断回调时通过 weak 函数钩子自动置 1
 - 未注册回调时退化到阻塞发送，不会崩溃
 - `Enroll_USART_RegisterIrqHandler` 必须调用，否则 TXE 中断无限循环
+- RTOS 下 USART 优先级 4（不感知）：TX/RX 永不被内核临界区屏蔽，且不调 RTOS API，天然安全
 
 ### 6.3 I2C 总线设计
 
 - 三个设备共享 I2C1（PB8/PB9）：MPU6050（0xD0）、QMC5883P（0x58）、BMP280（0xEC）
 - 统一 400kHz Fast Mode
-- 所有 I2C 读写均在主循环执行，ISR 不访问 I2C，避免硬件 I2C 状态机死锁
+- 所有 I2C 读写仅在任务上下文执行（SensorTask 等），ISR 不访问 I2C，避免硬件 I2C 状态机死锁
 - `BMP280_SelectI2CSpeed()` 每次 I2C 事务前选择总线+速率（BMP280 20Hz，开销可忽略）
 
 ### 6.4 NRF24L01 软件 SPI
 
 - 使用软件 SPI（非硬件 SPI1），100Hz 轮询足够
-- 硬件 SPI 存在与硬件 I2C 相同的不可重入问题，主循环传输若被 ISR 打断会丢数据
+- 硬件 SPI 存在与硬件 I2C 相同的不可重入问题，任务上下文传输若被更高优先级任务/ISR 打断会丢数据
 - 无其他 SPI 设备竞争，软件 SPI 带宽（~4MHz）远超 NRF 需求
 
 ---
 
 ## 7. 中断优先级 (IrqPriority.h)
 
-| 优先级 | 中断源 | 理由 |
-|:---:|------|------|
-| 0 | SysTick | 系统心跳基准 |
-| 1 | TIM1 (API_TIM1) | 1ms 控制节拍，PID/IMU/混控核心 |
-| 2 | MPU6050 EXTI | DMP 数据就绪，姿态外环输入 |
-| 3 | TIM2 (API_TIM2) | 任务标志调度 / 时间戳 |
-| 4 | USART1/3 | 通信（丢包可重传） |
+FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不感知」（严禁调 RTOS API）。
+
+| 优先级 | 中断源 | 感知 | 理由 |
+|:---:|------|:---:|------|
+| 4 | USART1/2/3 | 不感知 | 异步 TX/RX 纯内存操作，永不被内核屏蔽 → 串口零丢包 |
+| 5 | TIM3 控制节拍 | 感知 | `xSemaphoreGiveFromISR` → 唤醒 ControlTask（500Hz） |
+| 6 | MPU6050 EXTI | 感知 | `xSemaphoreGiveFromISR` → 唤醒 SensorTask（200Hz） |
+| 15 | SysTick / PendSV | 内核 | FreeRTOS 独占：系统节拍 + 上下文切换（固定最低） |
 
 ---
 
@@ -290,10 +314,14 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 3. **DShot 电调**：油门值需从最低（48）逐步递增，电调才响应
 4. **printf 异步 TX**：必须注册 USART 中断回调，否则 TX 队列不会排空
 5. **单平台**：全工程仅针对 STM32F407 编译；多平台移植（F103/G3507）见归档 tag `archive/multi-mcu-f103-g3507`
-6. **IMU_Init 顺序**：必须在 `API_TIM_Init(TIM1)` 之前调用，否则 ISR 访问未初始化状态
-7. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
-8. **I2C 总线**：所有 I2C 读写仅在主循环，ISR 不触碰 I2C（硬件 I2C 不可重入）
-9. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁。
+6. **RTOS 对象先于 ISR 源**：`Control_Task_RTOSInit()` 必须在 TIM3/EXTI 启动前调用，否则 ISR 给信号量时对象为 NULL
+7. **FromISR 限制**：只有优先级 ≥5 的中断可调 `...FromISR()`；USART（优先级 4）回调内严禁调用任何 FreeRTOS API
+8. **延时选型**：软件 I2C/SPI 的 µs 级 bit-bang 时序必须用 `Delay_us`（DWT 忙等）；任务级 ms 休眠用 `vTaskDelay/xTaskDelayUntil`
+9. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
+10. **I2C 总线**：所有 I2C 读写仅在任务上下文，ISR 不触碰 I2C（硬件 I2C 不可重入）
+11. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁
+12. **控制节拍依赖 TIM3**：TIM3 停则 ControlTask 永不唤醒，飞行中调试断点勿停在 TIM3 ISR 内
+13. **栈溢出钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` 开启，任务栈不足会进入 `vApplicationStackOverflowHook` 死循环（关中断），用调试器看 `pcTaskName` 定位
 
 ---
 
@@ -301,12 +329,14 @@ HW_DSHOT_MOTOR_MAP(DSHOT_CFG_PIN)
 
 1. [README.md](README.md) — 项目概览
 2. 本文档 — 架构全貌
-3. [A_Entry/main.c](A_Entry/main.c) — 飞控初始化 → 主循环
-4. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
-5. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
-6. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 中断回调 + 任务调度
-7. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
-8. [app/Altitude/Altitude.c](app/Altitude/Altitude.c) — 高度互补滤波融合
-9. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
-10. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级
-11. [CMakeLists.txt](CMakeLists.txt) — 构建入口
+3. [A_Entry/main.c](A_Entry/main.c) — 飞控初始化 → RTOS 调度器启动
+4. [A_Entry/FreeRTOSConfig.h](A_Entry/FreeRTOSConfig.h) — 内核配置（中断优先级分区 / 堆 / API 开关）
+5. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
+6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
+7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 6 任务 + 信号量/互斥锁 + ISR 回调
+8. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
+9. [app/Altitude/Altitude.c](app/Altitude/Altitude.c) — 高度互补滤波融合
+10. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
+11. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级（FreeRTOS 分区）
+12. [Middlewares/FreeRTOS-Kernel/](Middlewares/FreeRTOS-Kernel/) — vendored 内核 V11.1.0
+13. [CMakeLists.txt](CMakeLists.txt) — 构建入口

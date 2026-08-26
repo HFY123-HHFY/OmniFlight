@@ -56,10 +56,6 @@ static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交
  * ──────────────────────────────────────────────────────────────── */
 uint32_t Timer_Bsp_t = 0U;   /* 程序运行时间戳（s），由 HealthTask 每秒递增 */
 
-/* 旧标志位（保留兼容，原裸机主循环轮询，RTOS 任务不再使用） */
-volatile uint8_t nrf_task_flag   = 0U;
-volatile uint8_t print_task_flag = 0U;
-
 /* ────────────────────────────────────────────────────────────────
  * 串口打印开关：起飞前设 0 关闭所有 printf
  * ──────────────────────────────────────────────────────────────── */
@@ -91,7 +87,7 @@ static void ControlTask(void *pvParameters)
 		short gz    = gyroz;
 		xSemaphoreGive(xAttitudeMutex);
 
-		/* 陀螺 Z 轴积分 + 互补滤波（500Hz，与裸机一致） */
+		/* 陀螺 Z 轴积分 + 互补滤波（500Hz，dt=0.002s） */
 		IMU_Yaw_IntegrateGyro((float)gz / GYRO_SENS_2000DPS, 0.002f);
 
 		/* PID 控制 / 电机测试 */
@@ -197,14 +193,10 @@ static void TelemetryTask(void *pvParameters)
 		usart_printf(USART2, "STP: %.3fm %dmm f=%lu rx=%lu\r\n",
 			(double)stp23l_distance, (int)stp23l_distance_mm,
 			(unsigned long)stp23l_frame_cnt);
-
-		/* 调试用（按下文注释掉）：
 		// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", ...);
 		// usart_printf(USART3, "alt: %.1f ...\r\n", ...);
 		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 		// usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", ...);
-		*/
-
 		xSemaphoreGive(xPrintMutex);
 #endif
 	}
@@ -256,7 +248,7 @@ void Control_Task_RTOSInit(void)
  * Control_Task1_Callback — TIM3 1ms ISR
  *
  * 每 2ms = 500Hz 给 xControlSem 信号量，唤醒 ControlTask。
- * 使用 2ms 分频器（与裸机 TIM3 ISR 中的 pid_2ms_tick 一致）。
+ * TIM3 每 1ms 进一次中断，2 分频 = 500Hz 控制节拍。
  */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
@@ -305,7 +297,6 @@ void ControlTask_NotifyMpuIsr(void)
  *
  * 保持 FreeRTOS 不感知（USART 优先级 4 < configMAX_SYSCALL=5），
  * 不调用任何 FreeRTOS API。仅做硬件搬运：TX 队列排空 + RX 按串口分发。
- * 与裸机版本完全一致，无需修改。
  */
 void Control_Task_USART_Callback(API_USART_Id_t id)
 {

@@ -39,10 +39,9 @@ LED1 绿 LED2 红 LED3 蓝
 	X(API_USART2, API_USART_CORE_USART2, HW_USART2_TX_PORT, HW_USART2_TX_PIN, HW_USART2_RX_PORT, HW_USART2_RX_PIN) \
 	X(API_USART3, API_USART_CORE_USART3, HW_USART3_TX_PORT, HW_USART3_TX_PIN, HW_USART3_RX_PORT, HW_USART3_RX_PIN)
 
-/* TIM中断服务函数  注册了2路 */
+/* TIM 中断：仅注册 1 路 TIM3（500Hz 控制节拍，RTOS 后 TIM2 不再使用） */
 #define HW_TIM_MAP(X) \
-	X(API_TIM1, API_TIM_CORE_TIM3) \
-	X(API_TIM2, API_TIM_CORE_TIM2)
+	X(API_TIM1, API_TIM_CORE_TIM3)
 	
 /* PWM 板级映射 */
 #define HW_PWM_MAP(X)\
@@ -97,16 +96,12 @@ LED1 绿 LED2 红 LED3 蓝
 
 /* 当前板子上注册了 3 个 LED */
 #define HW_LED_COUNT  3U
-/* 当前板子上注册了 1 个按键 */
-#define HW_KEY_COUNT  1U
 /* 当前板子上注册了 3 路 USART */
 #define HW_USART_COUNT  3U
-/* 当前板子上注册了 2 路 TIM中断服务函数 */
-#define HW_TIM_COUNT  2U
+/* 当前板子上注册了 1 路 TIM 中断服务函数 */
+#define HW_TIM_COUNT  1U
 /* 当前板子上注册了 1 路 PWM 通道 */
 #define HW_PWM_COUNT  1U
-/* 当前板子上注册了 4 路 ADC 通道 */
-#define HW_ADC_COUNT  4U
 /* 当前板子上注册了 1 路软件 I2C */
 #define HW_I2C_COUNT  1U
 /* 当前板子上注册了 1 路软件 SPI */

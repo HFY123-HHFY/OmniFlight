@@ -14,6 +14,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 
 - 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
+- 🖥️ **FreeRTOS 实时内核** — 6 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
 - 🎛️ **串级 PID** — 外环角度 + 内环角速度，500Hz 控制节拍
 - 📡 **传感器融合** — MPU6050 DMP (Pitch/Roll) + QMC5883P 磁力计 + BMP280 气压计 + IMU 互补滤波 (Yaw) + 高度互补滤波 (aacz + BMP280)
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
@@ -30,6 +31,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 | 磁力计 | QMC5883P | I2C |
 | 气压计 | BMP280 | I2C |
 | 无线 | NRF24L01 | 软件 SPI |
+| 激光雷达 | STP-23L | USART1 230400 |
 | 电调 | BLHeli_S / BLHeli_32 | DShot300 |
 | 蜂鸣器 | 无源 | TIM3 CH4 PWM |
 
@@ -42,7 +44,8 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 | NRF24L01 (SCK/MOSI/MISO/CS/CE) | PA5/PA7/PA6/PC4/PC5 | 软件 SPI |
 | 电机 1~4 | PE9/PE11/PE13/PE14 | TIM1 CH1~4 |
 | 蜂鸣器 | PB1 | TIM3 CH4 |
-| 调试串口 | PA9/PA10 | USART1 |
+| 激光雷达串口 | PB6/PB7 | USART1 |
+| 调试串口 | PD5/PD6 | USART2 |
 | 无线串口 | PD8/PD9 | USART3 |
 | LED 1~3 | PE2/PE3/PE4 | GPIO |
 
@@ -50,10 +53,11 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 
 ```text
 OmniFlight/
-├─ A_Entry/main.c              # 飞控主循环
+├─ A_Entry/main.c              # 飞控初始化 + FreeRTOS 调度器启动
+│  FreeRTOSConfig.h            # 内核配置（中断优先级分区 / 堆 / API 开关）
 ├─ app/
 │  ├─ Control/                 # 串级 PID + 混控 + 陀螺校准
-│  ├─ Control_Task/            # 中断回调 + 任务标志位调度
+│  ├─ Control_Task/            # RTOS 任务 + ISR 回调（6 任务调度）
 │  ├─ PID/                     # PID 控制器
 │  ├─ Filter/                  # 低通/互补滤波器
 │  ├─ IMU/                     # 偏航角互补滤波融合
@@ -76,7 +80,8 @@ OmniFlight/
 ├─ Enroll/                     # ★ 硬件资源注册中心
 ├─ Core/                       # 芯片底层实现（STM32F407）
 ├─ Drivers/                    # 启动文件 + CMSIS
-├─ SYSTEM/                     # sys/Delay/BusRate/IrqPriority
+├─ SYSTEM/                     # sys/Delay(DWT)/BusRate/IrqPriority
+├─ Middlewares/FreeRTOS-Kernel/# FreeRTOS V11.1.0 内核源码（vendored）
 ├─ OpenOCD/                    # 下载配置
 └─ docs/arch-guide.md          # 架构深度解析
 ```
@@ -92,6 +97,14 @@ OmniFlight/
 └──────────┘    └──────────┘    └──────────┘
    500Hz            500Hz           X 型四轴
 
+FreeRTOS 任务模型（6 任务，优先级 6→1）：
+  TIM3 ISR ─信号量→ ControlTask(6)  500Hz PID + IMU 积分 + 混控
+  EXTI    ─信号量→ SensorTask(5)    200Hz 读 MPU6050 DMP/陀螺/加速度
+  LidarTask(4) 2ms   STP-23L 激光雷达协议解析
+  RadioTask(3) 10ms  NRF24L01 遥控+遥测
+  TelemetryTask(2) 100ms 串口打印
+  HealthTask(1) 1s  时间戳
+
 传感器数据流：
   MPU6050 DMP (200Hz) → Pitch/Roll → 角度环
   MPU6050 Gyro (500Hz) → gyrox/gyroy → 角速度环
@@ -103,11 +116,10 @@ OmniFlight/
 
 | 优先级 | 中断源 | 理由 |
 |:---:|------|------|
-| 0 | SysTick | 系统心跳 |
-| 1 | TIM1 (1ms) | PID 控制节拍 (500Hz) |
-| 2 | MPU6050 EXTI | DMP 数据就绪 (200Hz) |
-| 3 | TIM2 (1ms) | 任务标志调度 + 时间戳 |
-| 4 | USART1/3 | 通信 |
+| 4 | USART1/2/3 | 异步 TX/RX（不感知，永不被内核屏蔽） |
+| 5 | TIM3 (1ms) | 控制节拍 → 信号量唤醒 ControlTask (500Hz) |
+| 6 | MPU6050 EXTI | DMP 数据就绪 → 信号量唤醒 SensorTask (200Hz) |
+| 15 | SysTick / PendSV | FreeRTOS 内核独占（tick + 上下文切换） |
 
 ## ⚙️ 构建与烧录
 
@@ -132,6 +144,8 @@ cmake --build --preset Debug
 - 多平台移植（F103 / MSPM0G3507）已归档至 `git tag archive/multi-mcu-f103-g3507`，主分支不再保留
 - DShot 电调需从最低油门（48）逐步递增，不可直接跳到大油门值
 - 上电后需保持飞行器静止 ~10 秒（陀螺+重力校准 5s + BMP 归零 5s）
+- 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.9）
+- 只有优先级 ≥5 的中断可调用 FreeRTOS FromISR API；USART 回调内严禁调用
 
 ## 📮 联系
 

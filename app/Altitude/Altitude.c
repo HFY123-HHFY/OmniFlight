@@ -3,6 +3,7 @@
 #include "MPU6050_Int.h"
 #include "MPU6050.h"
 #include "LED.h"
+#include "Delay.h"
 
 /*
  * 互补滤波高度融合：
@@ -55,22 +56,17 @@ void Altitude_Init(float grav_ref)
     }
     else
     {
-        /* 回退：自身 5 秒采集 */
+        /* 回退：自身 5 秒采集（固定 5ms 采样节拍 = 200Hz） */
         float sum = 0.0f;
         uint16_t i;
-        uint16_t valid = 0U;
         for (i = 0U; i < 1000U; i++)
         {
-            uint32_t timeout = 500000U;
-            while (mpu_flag == 0U && timeout > 0U) { timeout--; }
-            if (timeout == 0U) { break; }
-            mpu_flag = 0U;
+            Delay_ms(5U);
             mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
             MPU_Get_Accelerometer(&aacx, &aacy, &aacz);
             sum += (float)aacz;
-            valid++;
         }
-        gravity_ref = (valid > 0U) ? (sum / (float)valid) : 16384.0f;
+        gravity_ref = sum / 1000.0f;
     }
     Alt_Fused    = 0.0f;
     Alt_Velocity = 0.0f;

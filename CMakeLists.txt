@@ -199,7 +199,7 @@ endif()
 
 ###############################################################
 # FreeRTOS 内核（Middlewares/FreeRTOS-Kernel）— Cortex-M4F + heap_4
-# 调度器当前未启动（见 A_Entry/FreeRTOSConfig.h），内核编译进来但保持休眠。
+# 调度器已在 main.c 中启动（配置见 A_Entry/FreeRTOSConfig.h），飞控控制链由 6 个 RTOS 任务接管。
 ###############################################################
 set(FREERTOS_KERNEL_SOURCES
     ${CMAKE_SOURCE_DIR}/Middlewares/FreeRTOS-Kernel/tasks.c

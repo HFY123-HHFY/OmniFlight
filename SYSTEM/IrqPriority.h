@@ -20,7 +20,6 @@
 
 #define IRQ_PRIO_MPU6050     6U   /* MPU6050 EXTI 数据就绪（感知，给传感器信号量） */
 #define IRQ_PRIO_TIM_CTRL    5U   /* TIM3 控制节拍 500Hz（感知，给控制信号量） */
-#define IRQ_PRIO_TIM_AUX     5U   /* TIM2（RTOS 后不再用作任务分频，保留兼容） */
 #define IRQ_PRIO_USART       4U   /* 串口（不感知，异步 TX/RX 永不被屏蔽） */
 #define IRQ_PRIO_DEFAULT     5U   /* 缺省中断 */
 

@@ -6,7 +6,7 @@
  *
  * 架构（两层缓冲）：
  *   1) ISR 调用 STP23L_RxPush(byte)  → 只入队到内部环形缓冲区（快）
- *   2) 主循环调用 STP23L_Task()      → 消费缓冲区 → 协议解析 → 刷新距离
+ *   2) LidarTask 调用 STP23L_Task()  → 消费缓冲区 → 协议解析 → 刷新距离
  *
  * 不负责：串口初始化 / 中断服务（API / Control_Task 层已处理）。
  *
@@ -14,7 +14,7 @@
  *   ISR 侧（Control_Task_USART_Callback）:
  *     STP23L_RxPush((uint8_t)data);  // 只入队，不解析
  *
- *   主循环侧（main.c）:
+ *   任务侧（LidarTask）:
  *     STP23L_Task();                 // 非阻塞消费 + 解析 + 刷新
  *     distance = stp23l_distance;    // 直接读取 (m)
  */
@@ -64,7 +64,7 @@ void STP23L_Init(void);
 void STP23L_RxPush(uint8_t byte);
 
 /*
- * 主循环调用：消费内部缓冲区中所有缓存的字节，
+ * 任务上下文调用：消费内部缓冲区中所有缓存的字节，
  * 逐字节完成协议解析，帧完整时自动刷新 stp23l_distance。
  * 非阻塞 — 缓冲区空时立即返回。
  */

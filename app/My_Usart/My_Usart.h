@@ -61,7 +61,7 @@ typedef struct
 	uint8_t buffer_len;
 } USART_DataType;
 
-/* 全局解析状态实例，建议在中断中喂数据，在主循环中读取结果。 */
+/* 全局解析状态实例，建议在中断中喂数据，在任务中读取结果。 */
 extern USART_DataType USART_DataTypeStruct;
 
 /*
@@ -78,7 +78,7 @@ uint8_t usart_send_byte_async(USART_TypeDef *USARTx, uint8_t Byte);
 
 /*
  * RX 异步队列 — 非阻塞读取
- * 字节由 ISR 自动入队，主循环调用以下接口消费。
+ * 字节由 ISR 自动入队，任务上下文调用以下接口消费。
  */
 
 /* 查询 RX 队列中可读字节数（非阻塞）。 */

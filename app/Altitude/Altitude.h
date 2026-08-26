@@ -20,7 +20,7 @@ extern float Set_Alt;
  * 高度融合初始化：
  *   gravity_ref: aacz 重力参考值 (GyroBias_Calibrate 同步采集)
  *   > 0 时直接使用，跳过自身校准
- *   ==0 时回退到自身 5s 采集（兼容旧调用方式）
+ *   ==0 时回退到自身 5s 采集
  */
 void Altitude_Init(float gravity_ref);
 
@@ -33,7 +33,7 @@ uint8_t Altitude_IsReady(void);
  *   baro_alt  : 气压计当前高度 (m)
  *   dt        : 距上次调用的时间 (s)，建议 0.005 (200Hz)
  *
- * 调用频率: 200Hz（mpu_flag 消费块中）
+ * 调用频率: 200Hz（与加速度采样同步，dt=0.005s）
  */
 void Altitude_Update(short raw_acc_z, float baro_alt, float dt);
 
