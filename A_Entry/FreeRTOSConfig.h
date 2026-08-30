@@ -50,7 +50,7 @@
  *   优先级 5~15 的中断 → FreeRTOS "感知"，会被内核临界区短暂屏蔽，允许调用 ...FromISR()。
  *   优先级 0~4  的中断 → FreeRTOS "不感知"，永不被屏蔽，但严禁调用任何 FreeRTOS API。
  * 本工程分配（见 SYSTEM/IrqPriority.h）：
- *   USART=4(不感知,异步TX零风险)  TIM3控制节拍=5(给信号量)  MPU6050 EXTI=6(给信号量)
+ *   USART=4(不感知,异步TX零风险)  TIM2控制节拍=5(给信号量)  MPU6050 EXTI=6(给信号量)
  */
 #define configLIBRARY_LOWEST_INTERRUPT_PRIORITY         15
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY    5

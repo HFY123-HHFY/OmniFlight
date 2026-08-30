@@ -4,6 +4,7 @@
 #include "LED.h"
 #include "usart.h"
 #include "My_Usart/My_Usart.h"
+#include "Delay.h"
 #include <math.h>
 
 /* 最近一次角度结果（单位：度，0~360）。 */
@@ -126,12 +127,10 @@ void QMC_GetData(int16_t *magX, int16_t *magY, int16_t *magZ)
 
 #define QMC_CAL_DURATION_SEC    30U
 
-extern uint32_t Timer_Bsp_t;   /* TIM2 维护的秒计数器 */
-
 static int16_t  s_cal_min_x, s_cal_max_x;
 static int16_t  s_cal_min_y, s_cal_max_y;
 static uint16_t s_cal_count;
-static uint32_t s_cal_start_s;
+static uint32_t s_cal_start_ms;
 static uint8_t  s_cal_done = 0U;
 
 void QMC_CalibBegin(void)
@@ -142,7 +141,7 @@ void QMC_CalibBegin(void)
 	s_cal_max_y   = -32768;
 	s_cal_count    = 0U;
 	s_cal_done     = 0U;
-	s_cal_start_s  = Timer_Bsp_t;
+	s_cal_start_ms = Delay_GetMs();   /* DWT 毫秒时钟，不依赖 RTOS tick */
 
 	LED_Control(LED3, LED_HIGH);
 }
@@ -157,7 +156,7 @@ void QMC_CalibSample(int16_t x, int16_t y)
 	if (y > s_cal_max_y) s_cal_max_y = y;
 	s_cal_count++;
 
-	if ((Timer_Bsp_t - s_cal_start_s) >= QMC_CAL_DURATION_SEC)
+	if ((Delay_GetMs() - s_cal_start_ms) >= (QMC_CAL_DURATION_SEC * 1000UL))
 	{
 		LED_Control(LED3, LED_LOW);
 		s_cal_done = 1U;

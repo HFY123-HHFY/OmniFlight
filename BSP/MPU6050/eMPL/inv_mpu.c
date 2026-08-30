@@ -2804,7 +2804,7 @@ lp_int_restore:
 #define q30  1073741824.0f
 
 #ifndef MPU6050_MOUNT_DIR
-#define MPU6050_MOUNT_DIR 1
+#define MPU6050_MOUNT_DIR 0U /* 0正面安装，1背面安装 */
 #endif
 
 #if (MPU6050_MOUNT_DIR == 0)

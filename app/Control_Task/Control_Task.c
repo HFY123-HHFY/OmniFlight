@@ -52,11 +52,6 @@ static SemaphoreHandle_t xAttitudeMutex;   /* 姿态数据互斥锁（SensorTask
 static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交织） */
 
 /* ────────────────────────────────────────────────────────────────
- * 全局变量
- * ──────────────────────────────────────────────────────────────── */
-uint32_t Timer_Bsp_t = 0U;   /* 程序运行时间戳（s），由 HealthTask 每秒递增 */
-
-/* ────────────────────────────────────────────────────────────────
  * 串口打印开关：起飞前设 0 关闭所有 printf
  * ──────────────────────────────────────────────────────────────── */
 #define DEBUG_PRINT_ENABLE  1U
@@ -64,7 +59,7 @@ uint32_t Timer_Bsp_t = 0U;   /* 程序运行时间戳（s），由 HealthTask �
 /* ────────────────────────────────────────────────────────────────
  * ControlTask — 500Hz 姿态控制（最高优先级 6）
  *
- * TIM3 每 2ms 给一次信号量 → 500Hz 控制节拍。
+ * TIM2 每 2ms 给一次信号量 → 500Hz 控制节拍。
  * 业务逻辑（原 TIM1 ISR 内容）：
  *   1) 读姿态共享数据（互斥锁保护）；
  *   2) IMU 偏航陀螺积分；
@@ -189,13 +184,9 @@ static void TelemetryTask(void *pvParameters)
 #if (DEBUG_PRINT_ENABLE == 1U)
 		xSemaphoreTake(xPrintMutex, portMAX_DELAY);
 
-		/* STP-23L 激光雷达距离 */
-		usart_printf(USART2, "STP: %.3fm %dmm f=%lu rx=%lu\r\n",
-			(double)stp23l_distance, (int)stp23l_distance_mm,
-			(unsigned long)stp23l_frame_cnt);
 		// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", ...);
 		// usart_printf(USART3, "alt: %.1f ...\r\n", ...);
-		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
+		// usart_printf(USART4, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
 		// usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", ...);
 		xSemaphoreGive(xPrintMutex);
 #endif
@@ -203,23 +194,9 @@ static void TelemetryTask(void *pvParameters)
 }
 
 /* ────────────────────────────────────────────────────────────────
- * HealthTask — 1Hz 时间戳 + LED 心跳（优先级 1，最低用户任务）
- * ──────────────────────────────────────────────────────────────── */
-static void HealthTask(void *pvParameters)
-{
-	(void)pvParameters;
-
-	for (;;)
-	{
-		vTaskDelay(pdMS_TO_TICKS(1000));
-		Timer_Bsp_t++;
-	}
-}
-
-/* ────────────────────────────────────────────────────────────────
  * Control_Task_RTOSInit — 创建所有 RTOS 对象
  *
- * 必须在 main() 中硬件外设启动前调用，确保 ISR 给信号量时对象已存在。
+ * 必须在 main() 中硬件外设（TIM2/MPU6050 EXTI）启动前调用，确保 ISR 给信号量时对象已存在。
  * ──────────────────────────────────────────────────────────────── */
 void Control_Task_RTOSInit(void)
 {
@@ -237,7 +214,6 @@ void Control_Task_RTOSInit(void)
 	xTaskCreate(LidarTask,      "Lidar",    256, NULL, 4, NULL);
 	xTaskCreate(RadioTask,      "Radio",    256, NULL, 3, NULL);
 	xTaskCreate(TelemetryTask,  "Telem",    256, NULL, 2, NULL);
-	xTaskCreate(HealthTask,     "Health",   256, NULL, 1, NULL);
 }
 
 /* ────────────────────────────────────────────────────────────────
@@ -245,14 +221,13 @@ void Control_Task_RTOSInit(void)
  * ──────────────────────────────────────────────────────────────── */
 
 /*
- * Control_Task1_Callback — TIM3 1ms ISR
+ * Control_Task1_Callback — TIM2 2ms ISR
  *
  * 每 2ms = 500Hz 给 xControlSem 信号量，唤醒 ControlTask。
- * TIM3 每 1ms 进一次中断，2 分频 = 500Hz 控制节拍。
+ * TIM2 直接按 2ms 周期配置（API_TIM_Init periodMs=2），ISR 内不再分频。
  */
 void Control_Task1_Callback(API_TIM_Id_t id)
 {
-	static uint8_t div = 0U;
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
 	if (id != API_TIM1)
@@ -265,14 +240,8 @@ void Control_Task1_Callback(API_TIM_Id_t id)
 		return;
 	}
 
-	div++;
-
-	if (div >= 2U)
-	{
-		div = 0U;
-		xSemaphoreGiveFromISR(xControlSem, &xHigherPriorityTaskWoken);
-		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-	}
+	xSemaphoreGiveFromISR(xControlSem, &xHigherPriorityTaskWoken);
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 /*
@@ -311,9 +280,13 @@ void Control_Task_USART_Callback(API_USART_Id_t id)
 
 		if (rxValid != 0U)
 		{
-			if (id == API_USART1)
+			// if (id == API_USART1)
+			// {
+			// 	STP23L_RxPush((uint8_t)data);  /* USART1: STP-23L 激光雷达 */
+			// }
+			if (id == API_USART4)
 			{
-				STP23L_RxPush((uint8_t)data);  /* USART1: STP-23L 激光雷达 */
+				
 			}
 		}
 	} while (rxValid != 0U);

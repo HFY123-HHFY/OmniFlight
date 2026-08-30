@@ -30,7 +30,7 @@
 ┌────────────────────────────────────────┐
 │  app/           应用层 — 飞控核心算法   │
 │  Control/       串级PID + 混控 + 陀螺校准│
-│  Control_Task/  RTOS 任务 + ISR 回调    │  6 任务调度 + 信号量/互斥锁
+│  Control_Task/  RTOS 任务 + ISR 回调    │  5 任务调度 + 信号量/互斥锁
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
 │  IMU/           偏航角互补滤波融合       │
@@ -108,6 +108,7 @@
 | USART1 TX/RX | PB6/PB7 | USART1 | STP-23L 激光雷达 230400 |
 | USART2 TX/RX | PD5/PD6 | USART2 | 板载调试 115200 |
 | USART3 TX/RX | PD8/PD9 | USART3 | 无线串口 115200 |
+| USART4 TX/RX | PA0/PA1 | UART4 | MTF-02P 115200（AF8，向量名 UART4_IRQHandler） |
 | LED1/2/3 | PE2/PE3/PE4 | GPIO | 绿/红/蓝 |
 
 ---
@@ -118,7 +119,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ TIM3 ISR (1ms, 优先级5) ─2分频→ xControlSem ──► ControlTask(6)      │
+│ TIM2 ISR (2ms, 优先级5) → xControlSem ──► ControlTask(6)            │
 │   500Hz：读姿态快照 → IMU 偏航积分 → 串级PID → 混控 → DShot          │
 ├─────────────────────────────────────────────────────────────────────┤
 │ MPU6050 EXTI (200Hz, 优先级6) → xMpuSem ──► SensorTask(5)           │
@@ -127,12 +128,11 @@
 │ LidarTask(4)     2ms 轮询   → STP23L_Task() 协议解析 (USART1 230400) │
 │ RadioTask(3)     10ms 周期  → NRF24L01_Data() 遥控+遥测 (100Hz)      │
 │ TelemetryTask(2) 100ms 周期 → usart_printf（xPrintMutex 保护）       │
-│ HealthTask(1)    1s 周期    → Timer_Bsp_t++ 运行时间戳               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-任务优先级 6（最高）→ 1（最低），0 为 idle/timer 服务任务。抢占式调度：
-ControlTask 由 TIM3 信号量唤醒后立即抢占所有低优先级任务，保证 500Hz 控制节拍抖动最小。
+任务优先级 6（最高）→ 2（最低），0 为 idle，软件定时器服务任务与 TelemetryTask 同为 2（时间片轮转）。抢占式调度：
+ControlTask 由 TIM2 信号量唤醒后立即抢占所有低优先级任务，保证 500Hz 控制节拍抖动最小。
 
 ### 5.2 串级 PID 架构
 
@@ -202,24 +202,23 @@ vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
 
 ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
-- `Control_Task1_Callback` → TIM3 1ms ISR → 2 分频 → `xSemaphoreGiveFromISR` 唤醒 ControlTask（500Hz）
+- `Control_Task1_Callback` → TIM2 2ms ISR → `xSemaphoreGiveFromISR` 唤醒 ControlTask（500Hz，定时器直接按 2ms 配置，ISR 内不分频）
 - `ControlTask_NotifyMpuIsr` → MPU6050 EXTI ISR → `xSemaphoreGiveFromISR` 唤醒 SensorTask（200Hz）
-- `Control_Task_USART_Callback` → USART1/2/3 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）
+- `Control_Task_USART_Callback` → USART1~4 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）
 
 ### 5.8 RTOS 对象一览
 
 | 任务 | 优先级 | 频率 | 唤醒方式 | 职责 |
 |------|:---:|:---:|----------|------|
-| ControlTask | 6 | 500Hz | xControlSem（TIM3 ISR） | 姿态快照 → IMU 积分 → 串级 PID → 混控 |
+| ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → IMU 积分 → 串级 PID → 混控 |
 | SensorTask | 5 | 200Hz | xMpuSem（EXTI ISR） | I2C 读 DMP/陀螺/加速度 → 提交全局姿态 |
 | LidarTask | 4 | 2ms 轮询 | xTaskDelayUntil | STP23L_Task 协议解析 |
 | RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
 | TelemetryTask | 2 | 100ms | xTaskDelayUntil | usart_printf 遥测打印 |
-| HealthTask | 1 | 1s | vTaskDelay | Timer_Bsp_t 时间戳 |
 
 | 同步对象 | 类型 | 保护内容 |
 |----------|------|----------|
-| xControlSem | 二值信号量 | TIM3 → ControlTask 500Hz 节拍 |
+| xControlSem | 二值信号量 | TIM2 → ControlTask 500Hz 节拍 |
 | xMpuSem | 二值信号量 | EXTI → SensorTask 200Hz 数据就绪 |
 | xAttitudeMutex | 互斥锁（优先级继承） | Pitch/Roll/Yaw/gyrox/y/z/aacx/y/z（SensorTask 写 / ControlTask 读） |
 | xPrintMutex | 互斥锁 | printf 串口输出防交织 |
@@ -227,7 +226,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 ### 5.9 FreeRTOS 接管设计要点
 
 - **启动流程**：main 初始化外设 → `Control_Task_RTOSInit()`（信号量/互斥锁/任务必须先于 ISR 源创建）→ `vTaskStartScheduler()` → SVC 启动第一个任务，SysTick/PendSV 移交内核
-- **中断优先级分区**：`configMAX_SYSCALL_INTERRUPT_PRIORITY=5`。USART=4 设为「不感知」（永不被内核临界区屏蔽，异步 TX 零丢包，但严禁调 RTOS API）；TIM3=5、EXTI=6 为「感知」（可调 FromISR API）
+- **中断优先级分区**：`configMAX_SYSCALL_INTERRUPT_PRIORITY=5`。USART=4 设为「不感知」（永不被内核临界区屏蔽，异步 TX 零丢包，但严禁调 RTOS API）；TIM2=5、EXTI=6 为「感知」（可调 FromISR API）
 - **同步设计**：ISR → 二值信号量 → 任务；共享姿态数据 → 互斥锁（优先级继承防优先级翻转）；printf → 互斥锁防交织
 - **延时选型**：µs 级 bit-bang 时序（软件 I2C/SPI）用 `Delay_us`（DWT 忙等，任务切换会被阻塞）；任务 ms 级休眠用 `vTaskDelay/xTaskDelayUntil`（让出 CPU）；Delay 已改为 DWT 计数器实现，与 SysTick 解耦
 - **安全钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` + 栈溢出/内存分配失败钩子 → 关中断死循环，方便调试器定位
@@ -283,8 +282,8 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 
 | 优先级 | 中断源 | 感知 | 理由 |
 |:---:|------|:---:|------|
-| 4 | USART1/2/3 | 不感知 | 异步 TX/RX 纯内存操作，永不被内核屏蔽 → 串口零丢包 |
-| 5 | TIM3 控制节拍 | 感知 | `xSemaphoreGiveFromISR` → 唤醒 ControlTask（500Hz） |
+| 4 | USART1~4 | 不感知 | 异步 TX/RX 纯内存操作，永不被内核屏蔽 → 串口零丢包 |
+| 5 | TIM2 控制节拍 | 感知 | `xSemaphoreGiveFromISR` → 唤醒 ControlTask（500Hz） |
 | 6 | MPU6050 EXTI | 感知 | `xSemaphoreGiveFromISR` → 唤醒 SensorTask（200Hz） |
 | 15 | SysTick / PendSV | 内核 | FreeRTOS 独占：系统节拍 + 上下文切换（固定最低） |
 
@@ -296,7 +295,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 |------|--------|------|
 | LED | API_GPIO | Enroll 注册，校准状态指示 |
 | MPU6050 | API_I2C + EXTI | DMP 姿态解算 + 陀螺原始值 |
-| QMC5883P | API_I2C | 地磁航向（含硬铁/软铁校准） |
+| QMC5883P | API_I2C + Delay | 地磁航向（含硬铁/软铁校准，计时用 Delay_GetMs） |
 | BMP280 | API_I2C | 气压高度（含地面归零校准） |
 | NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
 | IMU | MPU6050 + QMC5883P | 偏航角互补滤波融合 |
@@ -309,18 +308,18 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 
 ## 9. 已知注意事项
 
-1. **USART3 AF 修复**：`API_USART_GetAfNum` 从 AF8 改为 AF7（STM32F407 所有 USART 都是 AF7）
+1. **USART AF 复用号**：`API_USART_GetAfNum` 按串口返回 AF：USART1/2/3 = AF7，UART4 = AF8（UART5 同理）；中断向量名 UART4/UART5 无 'S'（`UART4_IRQHandler`），与 USART1~3 不同
 2. **NRF24L01 CE 注册**：`Enroll_NRF24L01_Register()` 必须在 `NRF24L01_Init()` 前调用
 3. **DShot 电调**：油门值需从最低（48）逐步递增，电调才响应
 4. **printf 异步 TX**：必须注册 USART 中断回调，否则 TX 队列不会排空
 5. **单平台**：全工程仅针对 STM32F407 编译；多平台移植（F103/G3507）见归档 tag `archive/multi-mcu-f103-g3507`
-6. **RTOS 对象先于 ISR 源**：`Control_Task_RTOSInit()` 必须在 TIM3/EXTI 启动前调用，否则 ISR 给信号量时对象为 NULL
+6. **RTOS 对象先于 ISR 源**：`Control_Task_RTOSInit()` 必须在 TIM2/EXTI 启动前调用，否则 ISR 给信号量时对象为 NULL
 7. **FromISR 限制**：只有优先级 ≥5 的中断可调 `...FromISR()`；USART（优先级 4）回调内严禁调用任何 FreeRTOS API
 8. **延时选型**：软件 I2C/SPI 的 µs 级 bit-bang 时序必须用 `Delay_us`（DWT 忙等）；任务级 ms 休眠用 `vTaskDelay/xTaskDelayUntil`
 9. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
 10. **I2C 总线**：所有 I2C 读写仅在任务上下文，ISR 不触碰 I2C（硬件 I2C 不可重入）
 11. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁
-12. **控制节拍依赖 TIM3**：TIM3 停则 ControlTask 永不唤醒，飞行中调试断点勿停在 TIM3 ISR 内
+12. **控制节拍依赖 TIM2**：TIM2 停则 ControlTask 永不唤醒，飞行中调试断点勿停在 TIM2 ISR 内
 13. **栈溢出钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` 开启，任务栈不足会进入 `vApplicationStackOverflowHook` 死循环（关中断），用调试器看 `pcTaskName` 定位
 
 ---
@@ -333,7 +332,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 4. [A_Entry/FreeRTOSConfig.h](A_Entry/FreeRTOSConfig.h) — 内核配置（中断优先级分区 / 堆 / API 开关）
 5. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
 6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
-7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 6 任务 + 信号量/互斥锁 + ISR 回调
+7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 5 任务 + 信号量/互斥锁 + ISR 回调
 8. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
 9. [app/Altitude/Altitude.c](app/Altitude/Altitude.c) — 高度互补滤波融合
 10. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议

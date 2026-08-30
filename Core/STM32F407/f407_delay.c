@@ -71,3 +71,19 @@ void Delay_s(uint32_t s)
 		--s;
 	}
 }
+
+/*
+ * 毫秒级单调时钟：自首次调用起累计，供上层模块做非阻塞计时（如传感器校准时长）。
+ * 无符号差值天然处理 CYCCNT 回绕，但两次调用间隔需小于回绕周期（168MHz 下约 25.5s）。
+ */
+uint32_t Delay_GetMs(void)
+{
+	static uint32_t last = 0U;
+	static uint32_t acc  = 0U;
+
+	F407_DwtInit();
+	acc += (uint32_t)(DWT->CYCCNT - last) / (SystemCoreClock / 1000U);
+	last = DWT->CYCCNT;
+
+	return acc;
+}

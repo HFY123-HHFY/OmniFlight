@@ -3,17 +3,19 @@
 
 static const API_USART_Config_t *s_usartTable;
 static uint8_t s_usartCount;
-static API_USART_IrqHandler_t s_usartIrqHandlers[API_USART3 + 1U];
+static API_USART_IrqHandler_t s_usartIrqHandlers[API_USART4 + 1U];
 
 #ifndef API_USART_CR1_TXEIE
 #define API_USART_CR1_TXEIE (1UL << 7)
 #endif
 
-/* USART1/2/3 对应的复用功能号。 */
+/* USART 对应的复用功能号：USART1/2/3 为 AF7，UART4 为 AF8。 */
 static uint8_t API_USART_GetAfNum(API_USART_Id_t id)
 {
-	/* STM32F407 所有 USART1/2/3 均使用 AF7 */
-	(void)id;
+	if (id == API_USART4)
+	{
+		return 8U;
+	}
 	return 7U;
 }
 
@@ -134,7 +136,7 @@ __attribute__((weak)) void API_USART_OnIrqHandlerRegistered(API_USART_Id_t id)
 
 void API_USART_RegisterIrqHandler(API_USART_Id_t id, API_USART_IrqHandler_t handler)
 {
-	if ((id < API_USART1) || (id > API_USART3))
+	if ((id < API_USART1) || (id > API_USART4))
 	{
 		return;
 	}
@@ -201,7 +203,7 @@ void API_USART_HandleIrqByCoreId(uint8_t coreId)
 		return;
 	}
 
-	if ((config->id < API_USART1) || (config->id > API_USART3))
+	if ((config->id < API_USART1) || (config->id > API_USART4))
 	{
 		return;
 	}
@@ -228,4 +230,10 @@ void USART2_IRQHandler(void)
 void USART3_IRQHandler(void)
 {
 	API_USART_HandleIrqByCoreId(API_USART_CORE_USART3);
+}
+
+/* F407 上 USART4 的中断向量名为 UART4_IRQHandler（无 S，与启动文件一致）。 */
+void UART4_IRQHandler(void)
+{
+	API_USART_HandleIrqByCoreId(API_USART_CORE_USART4);
 }

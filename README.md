@@ -14,7 +14,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 
 - 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
-- 🖥️ **FreeRTOS 实时内核** — 6 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
+- 🖥️ **FreeRTOS 实时内核** — 5 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
 - 🎛️ **串级 PID** — 外环角度 + 内环角速度，500Hz 控制节拍
 - 📡 **传感器融合** — MPU6050 DMP (Pitch/Roll) + QMC5883P 磁力计 + BMP280 气压计 + IMU 互补滤波 (Yaw) + 高度互补滤波 (aacz + BMP280)
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
@@ -57,7 +57,7 @@ OmniFlight/
 │  FreeRTOSConfig.h            # 内核配置（中断优先级分区 / 堆 / API 开关）
 ├─ app/
 │  ├─ Control/                 # 串级 PID + 混控 + 陀螺校准
-│  ├─ Control_Task/            # RTOS 任务 + ISR 回调（6 任务调度）
+│  ├─ Control_Task/            # RTOS 任务 + ISR 回调（5 任务调度）
 │  ├─ PID/                     # PID 控制器
 │  ├─ Filter/                  # 低通/互补滤波器
 │  ├─ IMU/                     # 偏航角互补滤波融合
@@ -97,13 +97,12 @@ OmniFlight/
 └──────────┘    └──────────┘    └──────────┘
    500Hz            500Hz           X 型四轴
 
-FreeRTOS 任务模型（6 任务，优先级 6→1）：
-  TIM3 ISR ─信号量→ ControlTask(6)  500Hz PID + IMU 积分 + 混控
+FreeRTOS 任务模型（5 任务，优先级 6→2）：
+  TIM2 ISR ─信号量→ ControlTask(6)  500Hz PID + IMU 积分 + 混控
   EXTI    ─信号量→ SensorTask(5)    200Hz 读 MPU6050 DMP/陀螺/加速度
   LidarTask(4) 2ms   STP-23L 激光雷达协议解析
   RadioTask(3) 10ms  NRF24L01 遥控+遥测
   TelemetryTask(2) 100ms 串口打印
-  HealthTask(1) 1s  时间戳
 
 传感器数据流：
   MPU6050 DMP (200Hz) → Pitch/Roll → 角度环
@@ -117,7 +116,7 @@ FreeRTOS 任务模型（6 任务，优先级 6→1）：
 | 优先级 | 中断源 | 理由 |
 |:---:|------|------|
 | 4 | USART1/2/3 | 异步 TX/RX（不感知，永不被内核屏蔽） |
-| 5 | TIM3 (1ms) | 控制节拍 → 信号量唤醒 ControlTask (500Hz) |
+| 5 | TIM2 (2ms) | 控制节拍 → 信号量唤醒 ControlTask (500Hz) |
 | 6 | MPU6050 EXTI | DMP 数据就绪 → 信号量唤醒 SensorTask (200Hz) |
 | 15 | SysTick / PendSV | FreeRTOS 内核独占（tick + 上下文切换） |
 

@@ -62,24 +62,25 @@ int main(void)
 
 	/* 注册后绑定中断回调 */
 	Enroll_USART_RegisterIrqHandler(Control_Task_USART_Callback);
-	                                              /* USART 中断回调：TX 排空 + RX 分发 */
+	                                            /* USART 中断回调：TX 排空 + RX 分发 */
 	API_TIM_RegisterIrqHandler(API_TIM1, Control_Task1_Callback);
-	                                              /* TIM3: 控制节拍 500Hz → 给信号量 */
+	                                            /* TIM2: 控制节拍 500Hz → 给信号量 */
 
 	/* ═══════════════════════════════════════════════════════════════
 	 * RTOS 初始化：创建信号量/互斥锁/任务。
-	 * 必须在 TIM3 和 MPU6050 EXTI 启动前调用，确保 ISR 给信号量时对象已存在。
+	 * 必须在 TIM2 和 MPU6050 EXTI 启动前调用，确保 ISR 给信号量时对象已存在。
 	 * ═══════════════════════════════════════════════════════════════ */
 	Control_Task_RTOSInit();
 
 	/* 初始化层：初始化相关外设，启动硬件功能 */
-	API_USART_Init(API_USART1, 230400U); // 初始化 USART1，波特率 230400U — 与 STP-23L 通信
-	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200  — 板载调试串口
-	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 无线串口调试
+	API_USART_Init(API_USART1, 115200U); // 初始化 USART1，波特率 115200U — 板载调试串口
+	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200  — 板载调试串口 -预留
+	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 板载调试串口 -预留
+	API_USART_Init(API_USART4, 115200U); // 初始化 USART4，波特率 115200  — MTF-02P
 
-	// IMU_Init();			/* 可选：IMU 状态重置。静态变量默认已零初始化，ControlTask 会自动开始零偏采集 */
-	API_TIM_Init(API_TIM1, 1U); /* TIM3: 控制节拍，每 1ms → 500Hz 分频给信号量 */
-	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U);
+	// IMU_Init();			/* IMU 状态重置。静态变量默认已零初始化，ControlTask 会自动开始零偏采集 */
+	API_TIM_Init(API_TIM1, 2U); /* TIM2: 控制节拍，每 2ms = 500Hz 直接给信号量 */
+	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U); /* TIM3: 蜂鸣器 PWM，ARR=369，PSC=83，1MHz/2700Hz≈369，50%占空比 */
 
 	/* 通信协议初始化 */
 	API_I2C_Init();						/* 软件 I2C 初始化 */
@@ -97,11 +98,9 @@ int main(void)
 	/* 校准过程中飞行器必须保持静止！LED3 亮 = 校准所有传感器中，灭 = 所有传感器校准完成 */
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
-	float gravity_ref = 0.0f;
-	(void)gravity_ref;  /* TODO: 取消注释 GyroBias_Calibrate 后移除此行 */
+	// float gravity_ref = 0.0f;
 	// if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
 	// {
-	// 	/* calib timeout - halt */
 	// 	while (1) {}
 	// }
 	/* 初始化QMC5883P */
@@ -132,7 +131,7 @@ int main(void)
 	Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
 
 	/* ═══════════════════════════════════════════════════════════════
-	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 6 个任务，永不返回。
+	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 5 个任务，永不返回。
 	 * ═══════════════════════════════════════════════════════════════ */
 	vTaskStartScheduler();
 

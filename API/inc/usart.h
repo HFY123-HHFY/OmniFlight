@@ -14,11 +14,13 @@ typedef enum
 	API_USART1 = 1U,
 	API_USART2 = 2U,
 	API_USART3 = 3U,
+	API_USART4 = 4U,
 } API_USART_Id_t;
 
 #define API_USART_CORE_USART1  (0U)
 #define API_USART_CORE_USART2  (1U)
 #define API_USART_CORE_USART3  (2U)
+#define API_USART_CORE_USART4  (3U)
 
 typedef struct
 {

@@ -8,7 +8,7 @@
 /* 坐标系修正: 与 DMP 的 gyro_orientation 保持一致（背面安装，绕 X 轴翻转180度） */
 
 #ifndef MPU6050_MOUNT_DIR
-#define MPU6050_MOUNT_DIR 1
+#define MPU6050_MOUNT_DIR 0U /* 0正面安装，1背面安装 */
 #endif
 
 #if (MPU6050_MOUNT_DIR == 0)
