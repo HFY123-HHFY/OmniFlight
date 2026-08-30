@@ -11,7 +11,7 @@
  * 任务模型（5 个任务，优先级 2~6；0 为 idle，软件定时器服务任务与 TelemetryTask 同为 2）：
  *   ControlTask(6)  — 500Hz 姿态控制，TIM2 信号量唤醒
  *   SensorTask(5)   — 200Hz MPU6050 DMP 读取，EXTI 信号量唤醒
- *   LidarTask(4)    — STP-23L 激光雷达协议解析，vTaskDelayUntil 轮询
+ *   Mtf02pTask(4)   — MTF-02P 光流测距 Micolink 协议解析，vTaskDelayUntil 轮询
  *   RadioTask(3)    — 100Hz NRF24L01 遥控+遥测，vTaskDelayUntil
  *   TelemetryTask(2)— 10Hz 串口打印，vTaskDelayUntil
  *

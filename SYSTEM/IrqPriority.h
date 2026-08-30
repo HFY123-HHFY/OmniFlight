@@ -13,8 +13,10 @@
  * 分配：
  *  - TIM_CTRL(5)：500Hz 控制节拍（TIM2），给 ControlTask 发二进制信号量 → 必须 >= 5
  *  - MPU6050(6) ：EXTI 数据就绪，给 SensorTask 发二进制信号量         → 必须 >= 5
- *  - USART(4)   ：异步 TX/RX 环形队列，纯内存操作不调 RTOS API，
+ *  - USART(4)   ：USART1~4 异步 TX/RX 环形队列，纯内存操作不调 RTOS API，
  *                 设为"不感知"(4 < 5)，永不被内核屏蔽 → 串口零丢包，异步打印不死锁
+ *                 USART4 接 MTF-02P 光流测距：RX 中断只入队（MTF02P_RxPush），
+ *                 协议解析在 Mtf02pTask 中执行，中断内不跑业务逻辑
  *  - 内核：SysTick/PendSV 固定 15（最低），由 FreeRTOS 自身接管
  */
 

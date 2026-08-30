@@ -44,7 +44,7 @@
 #include "Buzzer.h"
 #include "IMU.h"
 #include "Altitude.h"
-#include "STP23L.h"
+#include "MTF02P.h"
 
 int main(void)
 {
@@ -74,8 +74,8 @@ int main(void)
 
 	/* 初始化层：初始化相关外设，启动硬件功能 */
 	API_USART_Init(API_USART1, 115200U); // 初始化 USART1，波特率 115200U — 板载调试串口
-	API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200  — 板载调试串口 -预留
-	API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 板载调试串口 -预留
+	// API_USART_Init(API_USART2, 115200U); // 初始化 USART2，波特率 115200  — 板载调试串口 -预留
+	// API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 板载调试串口 -预留
 	API_USART_Init(API_USART4, 115200U); // 初始化 USART4，波特率 115200  — MTF-02P
 
 	// IMU_Init();			/* IMU 状态重置。静态变量默认已零初始化，ControlTask 会自动开始零偏采集 */
@@ -115,8 +115,8 @@ int main(void)
 	PID_Contorl_Init();
 	/* 初始化DShot协议 */
 	DShot_Init();
-	/* 初始化STP-23L激光雷达协议解析 */
-	STP23L_Init();
+	/* 初始化MTF-02P光流测距协议解析 */
+	MTF02P_Init();
 	/* 所有外设初始化完成-蜂鸣器初始化 */
 	Buzzer_Init();
 

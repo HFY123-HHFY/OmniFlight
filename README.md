@@ -19,6 +19,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 - 📡 **传感器融合** — MPU6050 DMP (Pitch/Roll) + QMC5883P 磁力计 + BMP280 气压计 + IMU 互补滤波 (Yaw) + 高度互补滤波 (aacz + BMP280)
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
 - 🛰️ **2.4G 遥控** — NRF24L01 软件 SPI 无线收发，双向遥测回传
+- 🛸 **光流测距** — MTF-02P Micolink 协议（USART4），距离 mm + 光流速度 cm/s@1m，定高定点数据源
 - ⚙️ **注册层（Enroll）** — X-Macro 编译期映射，换 MCU 只改一张配置表
 - 🚌 **软件总线** — I2C/SPI 协议与底层分离，速率集中配置
 
@@ -31,7 +32,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 | 磁力计 | QMC5883P | I2C |
 | 气压计 | BMP280 | I2C |
 | 无线 | NRF24L01 | 软件 SPI |
-| 激光雷达 | STP-23L | USART1 230400 |
+| 光流测距 | MTF-02P | USART4 115200（Micolink） |
 | 电调 | BLHeli_S / BLHeli_32 | DShot300 |
 | 蜂鸣器 | 无源 | TIM3 CH4 PWM |
 
@@ -44,7 +45,8 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 | NRF24L01 (SCK/MOSI/MISO/CS/CE) | PA5/PA7/PA6/PC4/PC5 | 软件 SPI |
 | 电机 1~4 | PE9/PE11/PE13/PE14 | TIM1 CH1~4 |
 | 蜂鸣器 | PB1 | TIM3 CH4 |
-| 激光雷达串口 | PB6/PB7 | USART1 |
+| 板载调试串口 | PB6/PB7 | USART1 |
+| 光流测距串口 | PA0/PA1 | USART4 |
 | 调试串口 | PD5/PD6 | USART2 |
 | 无线串口 | PD8/PD9 | USART3 |
 | LED 1~3 | PE2/PE3/PE4 | GPIO |
@@ -67,6 +69,7 @@ OmniFlight/
 │  ├─ MPU6050/                 # 六轴陀螺仪 + DMP
 │  ├─ QMC5883P/                # 磁力计（含硬铁/软铁校准）
 │  ├─ BMP280/                  # 气压计（含地面归零校准）
+│  ├─ MTF02P/                  # 光流测距一体化（Micolink）
 │  ├─ NRF24L01/                # 2.4G 无线模块
 │  ├─ Dshot/                   # DShot300 油门协议
 │  ├─ Motor/                   # 电机混控
@@ -100,7 +103,7 @@ OmniFlight/
 FreeRTOS 任务模型（5 任务，优先级 6→2）：
   TIM2 ISR ─信号量→ ControlTask(6)  500Hz PID + IMU 积分 + 混控
   EXTI    ─信号量→ SensorTask(5)    200Hz 读 MPU6050 DMP/陀螺/加速度
-  LidarTask(4) 2ms   STP-23L 激光雷达协议解析
+  Mtf02pTask(4) 2ms  MTF-02P Micolink 协议解析
   RadioTask(3) 10ms  NRF24L01 遥控+遥测
   TelemetryTask(2) 100ms 串口打印
 
@@ -109,6 +112,7 @@ FreeRTOS 任务模型（5 任务，优先级 6→2）：
   MPU6050 Gyro (500Hz) → gyrox/gyroy → 角速度环
   QMC5883P (50Hz) → Angle_XY → IMU 互补滤波 → IMU_Yaw
   BMP280 (20Hz) + aacz → 高度互补滤波 (20Hz) → Alt_Fused
+  MTF02P (~100Hz) → distance (mm) + flow_x/y (cm/s@1m) → 定高定点数据源
 ```
 
 ## 🎯 中断优先级
@@ -145,6 +149,7 @@ cmake --build --preset Debug
 - 上电后需保持飞行器静止 ~10 秒（陀螺+重力校准 5s + BMP 归零 5s）
 - 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.9）
 - 只有优先级 ≥5 的中断可调用 FreeRTOS FromISR API；USART 回调内严禁调用
+- MTF-02P 数据语义：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 tof_status / flow_status
 
 ## 📮 联系
 

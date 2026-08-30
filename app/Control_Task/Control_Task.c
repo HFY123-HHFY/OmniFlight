@@ -13,6 +13,7 @@
 #include "MPU6050_Int.h"
 #include "Motor.h"
 #include "NRF24L01.h"
+#include "MTF02P.h"
 
 /* ────────────────────────────────────────────────────────────────
  * FreeRTOS 钩子函数（应用层，由内核回调）
@@ -39,7 +40,6 @@ void vApplicationMallocFailedHook( void )
 	__asm volatile( "cpsid i" );
 	for ( ;; ) { }
 }
-#include "STP23L.h"
 #include "LED.h"
 #include "KEY.h"
 
@@ -131,12 +131,13 @@ static void SensorTask(void *pvParameters)
 }
 
 /* ────────────────────────────────────────────────────────────────
- * LidarTask — STP-23L 激光雷达协议解析（优先级 4）
+ * Mtf02pTask — MTF-02P 光流测距协议解析（优先级 4）
  *
- * 非阻塞轮询，2ms 周期消费 ISR 入队的字节（STP23L_RxPush 由 USART ISR 调用）。
- * 解析成功后自动刷新 stp23l_distance 等全局输出。
+ * 非阻塞轮询，2ms 周期消费 ISR 入队的字节（MTF02P_RxPush 由 USART ISR 调用）。
+ * Micolink 帧校验通过后自动刷新 mtf02p_data（距离 mm + 光流速度 cm/s@1m + 质量状态），
+ * 供后续定高定点使用。
  * ──────────────────────────────────────────────────────────────── */
-static void LidarTask(void *pvParameters)
+static void Mtf02pTask(void *pvParameters)
 {
 	(void)pvParameters;
 
@@ -145,7 +146,7 @@ static void LidarTask(void *pvParameters)
 	for (;;)
 	{
 		xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
-		STP23L_Task();
+		MTF02P_Task();
 	}
 }
 
@@ -183,11 +184,12 @@ static void TelemetryTask(void *pvParameters)
 
 #if (DEBUG_PRINT_ENABLE == 1U)
 		xSemaphoreTake(xPrintMutex, portMAX_DELAY);
-
-		// usart_printf(USART1, "QMC=%.1f  IMU=%.1f  Gz=%.1f  bias=%.2f\r\n", ...);
-		// usart_printf(USART3, "alt: %.1f ...\r\n", ...);
-		// usart_printf(USART4, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
-		// usart_printf(USART1, "Pitch=%.1f Roll=%.1f IMU=%.1f alt: %.1f\r\n", ...);
+		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll);
+		usart_printf(USART1, "dist=%lu mm flow=(%d,%d) q=%u st=%u/%u\r\n",
+		             (unsigned long)mtf02p_data.distance,
+		             mtf02p_data.flow_x, mtf02p_data.flow_y,
+		             mtf02p_data.flow_quality,
+		             mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
 		xSemaphoreGive(xPrintMutex);
 #endif
 	}
@@ -211,7 +213,7 @@ void Control_Task_RTOSInit(void)
 	/* 创建任务（栈深度单位：字 = 4 字节） */
 	xTaskCreate(ControlTask,    "Control",  512, NULL, 6, NULL);
 	xTaskCreate(SensorTask,     "Sensor",   512, NULL, 5, NULL);
-	xTaskCreate(LidarTask,      "Lidar",    256, NULL, 4, NULL);
+	xTaskCreate(Mtf02pTask,     "Mtf02p",   256, NULL, 4, NULL);
 	xTaskCreate(RadioTask,      "Radio",    256, NULL, 3, NULL);
 	xTaskCreate(TelemetryTask,  "Telem",    256, NULL, 2, NULL);
 }
@@ -280,13 +282,12 @@ void Control_Task_USART_Callback(API_USART_Id_t id)
 
 		if (rxValid != 0U)
 		{
-			// if (id == API_USART1)
-			// {
-			// 	STP23L_RxPush((uint8_t)data);  /* USART1: STP-23L 激光雷达 */
-			// }
-			if (id == API_USART4)
+			/* 
+			*MTF-02P 光流测距：
+			*ISR 只入队，协议解析在 Mtf02pTask 中进行 */
+			if (id == MTF02P_USART_ID)
 			{
-				
+				MTF02P_RxPush((uint8_t)data);
 			}
 		}
 	} while (rxValid != 0U);

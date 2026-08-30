@@ -105,7 +105,7 @@
 | 电机3 | PE13 | TIM1 CH3 | |
 | 电机4 | PE14 | TIM1 CH4 | |
 | 蜂鸣器 | PB1 | TIM3 CH4 | 2700Hz PWM |
-| USART1 TX/RX | PB6/PB7 | USART1 | STP-23L 激光雷达 230400 |
+| USART1 TX/RX | PB6/PB7 | USART1 | 板载调试串口 115200 |
 | USART2 TX/RX | PD5/PD6 | USART2 | 板载调试 115200 |
 | USART3 TX/RX | PD8/PD9 | USART3 | 无线串口 115200 |
 | USART4 TX/RX | PA0/PA1 | UART4 | MTF-02P 115200（AF8，向量名 UART4_IRQHandler） |
@@ -125,7 +125,7 @@
 │ MPU6050 EXTI (200Hz, 优先级6) → xMpuSem ──► SensorTask(5)           │
 │   200Hz：I2C 读 DMP + 陀螺 + 加速度 → 互斥锁提交姿态全局变量          │
 ├─────────────────────────────────────────────────────────────────────┤
-│ LidarTask(4)     2ms 轮询   → STP23L_Task() 协议解析 (USART1 230400) │
+│ Mtf02pTask(4)    2ms 轮询   → MTF02P_Task() Micolink 协议解析 (USART4 115200) │
 │ RadioTask(3)     10ms 周期  → NRF24L01_Data() 遥控+遥测 (100Hz)      │
 │ TelemetryTask(2) 100ms 周期 → usart_printf（xPrintMutex 保护）       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -204,7 +204,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
 - `Control_Task1_Callback` → TIM2 2ms ISR → `xSemaphoreGiveFromISR` 唤醒 ControlTask（500Hz，定时器直接按 2ms 配置，ISR 内不分频）
 - `ControlTask_NotifyMpuIsr` → MPU6050 EXTI ISR → `xSemaphoreGiveFromISR` 唤醒 SensorTask（200Hz）
-- `Control_Task_USART_Callback` → USART1~4 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）
+- `Control_Task_USART_Callback` → USART1~4 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）；USART4 数据 → `MTF02P_RxPush` 入队，解析在 Mtf02pTask
 
 ### 5.8 RTOS 对象一览
 
@@ -212,7 +212,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 |------|:---:|:---:|----------|------|
 | ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → IMU 积分 → 串级 PID → 混控 |
 | SensorTask | 5 | 200Hz | xMpuSem（EXTI ISR） | I2C 读 DMP/陀螺/加速度 → 提交全局姿态 |
-| LidarTask | 4 | 2ms 轮询 | xTaskDelayUntil | STP23L_Task 协议解析 |
+| Mtf02pTask | 4 | 2ms 轮询 | xTaskDelayUntil | MTF02P_Task Micolink 协议解析（距离+光流） |
 | RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
 | TelemetryTask | 2 | 100ms | xTaskDelayUntil | usart_printf 遥测打印 |
 
@@ -298,6 +298,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 | QMC5883P | API_I2C + Delay | 地磁航向（含硬铁/软铁校准，计时用 Delay_GetMs） |
 | BMP280 | API_I2C | 气压高度（含地面归零校准） |
 | NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
+| MTF02P | 无（纯协议解析） | Micolink 光流测距一体化（USART4）：距离 mm + 光流 cm/s@1m + 质量状态 |
 | IMU | MPU6050 + QMC5883P | 偏航角互补滤波融合 |
 | Altitude | MPU6050 + BMP280 | 高度互补滤波融合 (aacz + 气压计) |
 | Dshot | Core f407_pwm + f407_dma | DShot300 油门 |
@@ -321,6 +322,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 11. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁
 12. **控制节拍依赖 TIM2**：TIM2 停则 ControlTask 永不唤醒，飞行中调试断点勿停在 TIM2 ISR 内
 13. **栈溢出钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` 开启，任务栈不足会进入 `vApplicationStackOverflowHook` 死循环（关中断），用调试器看 `pcTaskName` 定位
+14. **MTF-02P 数据语义**：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 `MTF02P_IsRangeValid()` / `MTF02P_IsFlowValid()`（对应 tof_status / flow_status）
 
 ---
 
