@@ -90,19 +90,19 @@ int main(void)
 
 	/*BSP硬件抽象层初始化*/
 	LED_Init(LED_LOW);	/* LED 初始化-低电平 */
-	// MPU_Init();	/* 初始化MPU6050 */
-	// uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
-	// usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
+	MPU_Init();	/* 初始化MPU6050 */
+	uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
+	usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 
 	/* 校准过程中飞行器必须保持静止！LED3 亮 = 校准所有传感器中，灭 = 所有传感器校准完成 */
 	LED_Control(LED3, LED_HIGH);
 	/* 5秒陀螺零偏校准 */
-	// float gravity_ref = 0.0f;
-	// if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
-	// {
-	// 	while (1) {}
-	// }
+	float gravity_ref = 0.0f;
+	if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
+	{
+		while (1) {}
+	}
 	/* 初始化QMC5883P */
 	// QMC_Init();
 	/* 高度融合初始化（5秒重力参考采集） */
@@ -120,15 +120,11 @@ int main(void)
 	/* 所有外设初始化完成-蜂鸣器初始化 */
 	Buzzer_Init();
 
-	/*
-	 * 串级PID参数（基于 dt=0.002s，500Hz）
-	 * 调参顺序：先 KP → 再 KD → 最后 KI
-	 */
-	// Set_PID(&pid_pitch,      4.0f, 0.3f, 0.0f);
-	// Set_PID(&pid_rate_pitch, 1.8f, 0.0f, 0.015f);
+	Set_PID(&pid_pitch,      4.0f, 0.0f, 0.20f);
+	Set_PID(&pid_rate_pitch, 1.0f, 0.015f, 0.0f);
 
-	// Set_PID(&pid_roll,       4.0f, 0.3f, 0.0f);
-	// Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
+	Set_PID(&pid_roll,       4.0f, 0.0f, 0.20f);
+	Set_PID(&pid_rate_roll,  1.0f, 0.015f, 0.0f);
 
 	/* ═══════════════════════════════════════════════════════════════
 	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 5 个任务，永不返回。

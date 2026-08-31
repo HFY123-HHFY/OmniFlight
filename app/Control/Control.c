@@ -144,7 +144,8 @@ void Set_Gyro_Bias(float bias_x, float bias_y)
  *
  *   内环（角速度→电机输出）：
  *     Out_max = 2047   → 对称输出，混控层再做 DShot 区间限幅
- *     Integral_max=100 → I_out 最大 ≈ 500（DShot 范围 ~25%），避免 I 项过主导
+ *     Integral_max=100 → I_out 最大 = ki×100（当前 ki=0.015 → ≈1.5），
+ *                        调大 ki 时注意该上限（如 ki=2.5 → 250）
  *
  *   角速度低通：
  *     alpha = 0.45     → 截止频率 ~36Hz @ 500Hz 采样，抑制电机高频振动
