@@ -90,9 +90,9 @@ int main(void)
 
 	/*BSP硬件抽象层初始化*/
 	LED_Init(LED_LOW);	/* LED 初始化-低电平 */
-	MPU_Init();	/* 初始化MPU6050 */
-	uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
-	usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
+	// MPU_Init();	/* 初始化MPU6050 */
+	// uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
+	// usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 
 	/* 校准过程中飞行器必须保持静止！LED3 亮 = 校准所有传感器中，灭 = 所有传感器校准完成 */

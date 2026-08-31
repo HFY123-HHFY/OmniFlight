@@ -428,56 +428,51 @@ void App_NRF24L01_TestOnce(void)
 }
 
 /* 应用层：和遥控器交换数据 */
-uint8_t SendFlag = 0;								//发送标志位
-uint8_t ReceiveFlag = 0;							//接收标志位
+static uint8_t SendFlag = 0;						//发送标志位
+static uint8_t ReceiveFlag = 0;						//接收标志位
+static uint8_t s_telemetryRequest = 0;				//遥控器回传请求标志
+volatile int8_t R_H = 0; // 右边摇杆纵向偏移量（-100~100）
 
-//数据包发送接收刷新:
-void NRF24L01_Data(void)
-{	
+//接收数据包：解析遥控指令，每收到一包都回传遥测
+void NRF24L01_RX_Data(void)
+{
 	ReceiveFlag = NRF24L01_Receive();
-	if(ReceiveFlag == 1)
+	if (ReceiveFlag != 1)
 	{
-		uint8_t Mode = NRF24L01_RxPacket[0];
-
-		if (Mode == 1) //回传数据包
-		{
-			NRF24L01_TxPacket[0] = 0x01; // 回传数据包ID
-			// 回传基础油门 speed_temp (uint16_t, 低字节在前)
-			NRF24L01_WriteU16LE(NRF24L01_TxPacket, 1, speed_temp);  // 占用1，2 字节
-			NRF24L01_TxPacket[3] = 0U;
-
-			//4~23 字节放姿态数据
-			*(float *)&NRF24L01_TxPacket[4] = Pitch; // 占用4，5，6，7
-			*(float *)&NRF24L01_TxPacket[8] = Roll; // 占用8，9，10，11
-			*(float *)&NRF24L01_TxPacket[12] = IMU_Yaw; // 占用12，13，14，15
-			*(float *)&NRF24L01_TxPacket[16] = Alt_Fused; // 占用16,17,18,19
-
-			*(float *)&NRF24L01_TxPacket[20] = pid_rate_pitch.output; // 占用20，21，22，23
-			*(float *)&NRF24L01_TxPacket[24] = pid_rate_roll.output; // 占用24，25，26，27
-			*(float *)&NRF24L01_TxPacket[28] = pid_alt.output; // 占用28,29,30,31
-
-			//24~31 字节放最终加载到4个电机上的油门值
-			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 24, Motor_Output[0]);  // 占用24，25 字节
-			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 26, Motor_Output[1]);  // 占用26，27 字节
-			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 28, Motor_Output[2]);  // 占用28，29 字节
-			// NRF24L01_WriteU16LE(NRF24L01_TxPacket, 30, Motor_Output[3]);  // 占用30，31 字节
-			SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
-		}
-		//得到遥控器的键值
-		Key = NRF24L01_RxPacket[1];
-
-		/* 遥控器0~250映射到DShot油门48~PWM_DUTY_MAX(2047) */
-		uint16_t rx_duty = (uint16_t)(DSHOT_THROTTLE_MIN +
-			(((uint32_t)NRF24L01_RxPacket[2] * (PWM_DUTY_MAX - DSHOT_THROTTLE_MIN)) / 250U));
-
-		speed_temp = rx_duty; //把油门给到PWM占空比
-
-		if (Key == 1) //解锁基础油门
-		{
-			speed_temp = rx_duty; //把油门给到PWM占空比
-		}
-
-		// 得到高度变化值
-		Set_Alt = *(float *)&NRF24L01_RxPacket[4];
+		return;
 	}
+
+	//收到任意遥控数据包都回传遥测
+	s_telemetryRequest = 1;
+
+	//得到遥控器的键值
+	Key = NRF24L01_RxPacket[0];
+
+	/* 遥控器0~250映射到DShot油门48~PWM_DUTY_MAX(2047) */
+	uint16_t rx_duty = (uint16_t)(DSHOT_THROTTLE_MIN +
+		(((uint32_t)NRF24L01_RxPacket[1] * (PWM_DUTY_MAX - DSHOT_THROTTLE_MIN)) / 250U));
+
+	R_H  = (int8_t)NRF24L01_RxPacket[2];
+
+	speed_temp = rx_duty; //把油门给到PWM占空比
+
+	if (Key == 1) //解锁基础油门
+	{
+		speed_temp = rx_duty; //把油门给到PWM占空比
+	}
+}
+
+//发送数据包：收到新遥控包后组包回传遥测
+void NRF24L01_TX_Data(void)
+{
+	if (s_telemetryRequest == 0)
+	{
+		return;
+	}
+	s_telemetryRequest = 0;
+
+	//姿态数据
+	*(float *)&NRF24L01_TxPacket[0] = Pitch; // 占用0，1，2，3
+	*(float *)&NRF24L01_TxPacket[4] = Roll;  // 占用4，5，6，7
+	SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
 }

@@ -13,9 +13,6 @@ extern float Alt_Fused;
 /* 垂直速度 (m/s) */
 extern float Alt_Velocity;
 
-/* 设置高度环的目标值 */
-extern float Set_Alt;
-
 /*
  * 高度融合初始化：
  *   gravity_ref: aacz 重力参考值 (GyroBias_Calibrate 同步采集)

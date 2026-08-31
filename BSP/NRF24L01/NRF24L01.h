@@ -64,7 +64,10 @@ void NRF24L01_UpdateRxAddress(void);
 /* 最小回环读写测试：校验寄存器读写链路是否正常。 */
 void App_NRF24L01_TestOnce(void);
 
-/* 和遥控器交换数据  */
-void NRF24L01_Data(void);
+extern volatile int8_t R_H; // 右边摇杆纵向偏移量（-100~100）
+
+/* 和遥控器交换数据 */
+void NRF24L01_RX_Data(void);   /* 接收数据包：解析遥控指令，Mode==1 置回传请求 */
+void NRF24L01_TX_Data(void);   /* 发送数据包：请求有效时组包发送遥测 */
 
 #endif /* __NRF24L01_H */
