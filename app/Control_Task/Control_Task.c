@@ -88,11 +88,11 @@ static void ControlTask(void *pvParameters)
 		/* PID 控制-电机混控 */
 		if (Key == 1U)
 		{
-			// PID_Pitch_Roll_Combined(pitch, roll); /* PID → 混控 → DShot_Write */
+			PID_Pitch_Roll_Combined(pitch, roll); /* PID → 混控 → DShot_Write */
 		}
 		else
 		{
-			// Motor_Test(); /* 未解锁时仍走电机状态机（处理掉电缓降） */
+			Motor_Test(); /* 未解锁时仍走电机状态机（处理掉电缓降） */
 		}
 	}
 }
@@ -191,7 +191,7 @@ static void TelemetryTask(void *pvParameters)
 		//              mtf02p_data.flow_x, mtf02p_data.flow_y,
 		//              mtf02p_data.flow_quality,
 		//              mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
-		usart_printf(USART1, "Key=%d speed_temp=%d R_H=%d\r\n", Key, speed_temp, R_H); /* NRF24L01测试打印 */
+		// usart_printf(USART1, "Key=%d speed_temp=%d R_H=%d\r\n", Key, speed_temp, R_H); /* NRF24L01测试打印 */
 		xSemaphoreGive(xPrintMutex);
 #endif
 	}

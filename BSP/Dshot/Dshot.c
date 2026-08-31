@@ -110,15 +110,15 @@ static uint16_t DShot_NormalizeThrottle(uint16_t throttle)
 
 /*
  * 逻辑电机号 (m1~m4) → TIM1 物理通道映射。
- * 当前接线对应关系：CH1←m3, CH2←m1, CH3←m2, CH4←m4
+ * 映射关系由 Dshot.h 中的 DSHOT_Mx_CH 宏决定（调机时改宏即可）。
  */
 static void DShot_MapLogicalToChannels(uint16_t m1, uint16_t m2,
                                        uint16_t m3, uint16_t m4)
 {
-    g_dshot_throttle[0] = DShot_NormalizeThrottle(m3);
-    g_dshot_throttle[1] = DShot_NormalizeThrottle(m1);
-    g_dshot_throttle[2] = DShot_NormalizeThrottle(m2);
-    g_dshot_throttle[3] = DShot_NormalizeThrottle(m4);
+    g_dshot_throttle[DSHOT_M1_CH - 1U] = DShot_NormalizeThrottle(m1);
+    g_dshot_throttle[DSHOT_M2_CH - 1U] = DShot_NormalizeThrottle(m2);
+    g_dshot_throttle[DSHOT_M3_CH - 1U] = DShot_NormalizeThrottle(m3);
+    g_dshot_throttle[DSHOT_M4_CH - 1U] = DShot_NormalizeThrottle(m4);
 }
 
 /*

@@ -80,10 +80,10 @@ static void Motor_MixWithDesaturation(float base, float pitch, float roll,
     float shift;
 
     /* 1) 混控矩阵 → 四路理想输出 */
-    m1_raw = base + pitch + roll;
-    m2_raw = base - pitch + roll;
-    m3_raw = base + pitch - roll;
-    m4_raw = base - pitch - roll;
+    m1_raw = base - pitch + roll;
+    m2_raw = base + pitch + roll;
+    m3_raw = base - pitch - roll;
+    m4_raw = base + pitch - roll;
 
     /* 2) 找四路极值 */
     max_raw = m1_raw;

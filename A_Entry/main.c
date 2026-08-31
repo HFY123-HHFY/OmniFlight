@@ -124,11 +124,11 @@ int main(void)
 	 * 串级PID参数（基于 dt=0.002s，500Hz）
 	 * 调参顺序：先 KP → 再 KD → 最后 KI
 	 */
-	Set_PID(&pid_pitch,      4.0f, 0.3f, 0.0f);
-	Set_PID(&pid_rate_pitch, 1.8f, 0.0f, 0.015f);
+	// Set_PID(&pid_pitch,      4.0f, 0.3f, 0.0f);
+	// Set_PID(&pid_rate_pitch, 1.8f, 0.0f, 0.015f);
 
-	Set_PID(&pid_roll,       4.0f, 0.3f, 0.0f);
-	Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
+	// Set_PID(&pid_roll,       4.0f, 0.3f, 0.0f);
+	// Set_PID(&pid_rate_roll,  1.8f, 0.0f, 0.015f);
 
 	/* ═══════════════════════════════════════════════════════════════
 	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 5 个任务，永不返回。
