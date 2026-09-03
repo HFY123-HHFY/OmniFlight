@@ -15,13 +15,13 @@ extern "C" {
  * BSP/Motor — 电机混控模块
  *
  * 职责：
- * - 将遥控器油门 + PID 姿态修正量按 X 型混控矩阵分配到 4 路电机
+ * - 将遥控器油门 + PID 姿态修正量（pitch/roll/yaw）按 X 型混控矩阵分配到 4 路电机
  * - 混控反饱和：输出超出 DShot 范围时整体平移，保留姿态力矩
  * - 电机掉电时缓降油门，避免骤停
  *
  * 依赖：
  * - BSP/Dshot：DShot_Write + DSHOT_THROTTLE_MIN/MAX
- * - app/Control：pid_rate_pitch / pid_rate_roll（角速度环 PID 输出）
+ * - app/Control：pid_rate_pitch / pid_rate_roll / pid_rate_yaw（角速度环 PID 输出）
  * - BSP/LED：LED_Control 状态指示
  * - BSP/KEY：Key 按键事件
  */

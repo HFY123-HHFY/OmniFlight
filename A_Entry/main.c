@@ -1,8 +1,7 @@
 /*
 * OmniFlight — 四轴飞控 (FreeRTOS 版)
 *
-* 初始化相关外设并校准各个传感器：
-* 陀螺仪、磁力计、气压计各五秒，共计飞控需静止10S左右-蓝灯亮
+* 初始化相关外设并校准陀螺仪（X/Y/Z 三轴零偏，约 5 秒，飞行器需静止）-蓝灯亮
 *
 * 校准完毕蓝灯灭
 * 全部外设初始化完-蜂鸣器鸣笛蓝灯灭
@@ -42,8 +41,6 @@
 #include "Dshot.h" /* DShot协议 初始化 */
 #include "NRF24L01.h"
 #include "Buzzer.h"
-#include "IMU.h"
-#include "Altitude.h"
 #include "MTF02P.h"
 
 int main(void)
@@ -78,7 +75,6 @@ int main(void)
 	// API_USART_Init(API_USART3, 115200U); // 初始化 USART3，波特率 115200  — 板载调试串口 -预留
 	API_USART_Init(API_USART4, 115200U); // 初始化 USART4，波特率 115200  — MTF-02P
 
-	// IMU_Init();			/* IMU 状态重置。静态变量默认已零初始化，ControlTask 会自动开始零偏采集 */
 	API_TIM_Init(API_TIM1, 2U); /* TIM2: 控制节拍，每 2ms = 500Hz 直接给信号量 */
 	API_PWM_Init(API_PWM_TIM3, (1000000U / 2700U) - 1, 84U - 1U); /* TIM3: 蜂鸣器 PWM，ARR=369，PSC=83，1MHz/2700Hz≈369，50%占空比 */
 
@@ -97,17 +93,12 @@ int main(void)
 
 	/* 校准过程中飞行器必须保持静止！LED3 亮 = 校准所有传感器中，灭 = 所有传感器校准完成 */
 	LED_Control(LED3, LED_HIGH);
-	/* 5秒陀螺零偏校准 */
-	float gravity_ref = 0.0f;
-	if (GyroBias_Calibrate(1000U, &gravity_ref) == 0U)
-	{
-		while (1) {}
-	}
-	/* 初始化QMC5883P */
+	/* 
+	*5 秒陀螺零偏校准（X/Y/Z 三轴）。函数无失败路径恒返回 1 */
+	GyroBias_Calibrate(1000U);
+	/* 初始化QMC5883P（磁力计驱动保留，当前未启用） */
 	// QMC_Init();
-	/* 高度融合初始化（5秒重力参考采集） */
-	// Altitude_Init(gravity_ref);
-	/* 初始化BMP280（5秒自动地面归零校准） */
+	/* 初始化BMP280（气压计驱动保留，当前未启用） */
 	// BMP280Init();
 	/* 初始化NRF24L01 */
 	NRF24L01_Init();
@@ -125,6 +116,9 @@ int main(void)
 
 	Set_PID(&pid_roll,       4.0f, 0.0f, 0.20f);
 	Set_PID(&pid_rate_roll,  1.0f, 0.015f, 0.0f);
+
+	/* 偏航环初始参数：偏航力矩弱于俯仰/滚转，P 给大；台架验证方向后逐步调 */
+	Set_PID(&pid_rate_yaw,   2.0f, 0.05f, 0.0f);
 
 	/* ═══════════════════════════════════════════════════════════════
 	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 5 个任务，永不返回。

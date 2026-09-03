@@ -4,8 +4,6 @@
 #include "My_Usart/My_Usart.h"
 #include "gpio.h"
 #include "Motor.h"
-#include "IMU.h"
-#include "Altitude.h"
 
 /*
  * NRF24L01 模块私有状态：

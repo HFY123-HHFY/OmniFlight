@@ -8,7 +8,6 @@
 #include "usart.h"
 #include "My_Usart/My_Usart.h"
 #include "Control/Control.h"
-#include "IMU.h"
 #include "MPU6050.h"
 #include "MPU6050_Int.h"
 #include "Motor.h"
@@ -62,8 +61,7 @@ static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交
  * TIM2 每 2ms 给一次信号量 → 500Hz 控制节拍。
  * 业务逻辑（原 TIM1 ISR 内容）：
  *   1) 读姿态共享数据（互斥锁保护）；
- *   2) IMU 偏航陀螺积分；
- *   3) 已解锁 → 串级 PID + 混控 + DShot 输出；
+ *   2) 已解锁 → Pitch/Roll 串级 PID + 偏航角速度环 + 三轴混控 + DShot 输出；
  *      未解锁 → Motor_Test（电机掉电保护状态机）。
  * ──────────────────────────────────────────────────────────────── */
 static void ControlTask(void *pvParameters)
@@ -82,13 +80,12 @@ static void ControlTask(void *pvParameters)
 		short gz    = gyroz;
 		xSemaphoreGive(xAttitudeMutex);
 
-		/* 陀螺 Z 轴积分 + 互补滤波（500Hz，dt=0.002s） */
-		IMU_Yaw_IntegrateGyro((float)gz / GYRO_SENS_2000DPS, 0.002f);
-
 		/* PID 控制-电机混控 */
 		if (Key == 1U)
 		{
-			PID_Pitch_Roll_Combined(pitch, roll); /* PID → 混控 → DShot_Write */
+			PID_Pitch_Roll_Combined(pitch, roll);                    /* Pitch/Roll 串级 PID */
+			PID_Yaw_Rate_Control((float)gz / GYRO_SENS_2000DPS);     /* 偏航角速度环（消除自旋） */
+			Motor_Test();                                            /* 三轴混控 → DShot_Write */
 		}
 		else
 		{
@@ -186,6 +183,9 @@ static void TelemetryTask(void *pvParameters)
 #if (DEBUG_PRINT_ENABLE == 1U)
 		xSemaphoreTake(xPrintMutex, portMAX_DELAY);
 		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll); /* 姿态打印 */
+		usart_printf(USART1, "gz=%.1f dps yaw_out=%.1f\r\n",
+		             (double)((float)gyroz / GYRO_SENS_2000DPS),
+		             (double)pid_rate_yaw.output);                    /* 偏航环调试打印 */
 		// usart_printf(USART1, "dist=%lu mm flow=(%d,%d) q=%u st=%u/%u\r\n",
 		//              (unsigned long)mtf02p_data.distance,
 		//              mtf02p_data.flow_x, mtf02p_data.flow_y,

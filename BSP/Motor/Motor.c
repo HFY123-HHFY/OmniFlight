@@ -4,14 +4,21 @@
  * BSP/Motor/Motor.c — 电机混控实现
  *
  * 混控矩阵（X 型四轴）：
- *   M1 = Base + Pitch + Roll
- *   M2 = Base - Pitch + Roll
- *   M3 = Base + Pitch - Roll
- *   M4 = Base - Pitch - Roll
+ *   M1 = Base + Pitch + Roll + Yaw*YAW_DIR
+ *   M2 = Base - Pitch + Roll - Yaw*YAW_DIR
+ *   M3 = Base + Pitch - Roll + Yaw*YAW_DIR
+ *   M4 = Base - Pitch - Roll - Yaw*YAW_DIR
+ *
+ * 偏航力矩由对角电机反扭矩差产生（M1/M3 对角同向，M2/M4 对角同向）。
+ * 台架测试：解锁后手持机身绕 Z 轴转动，若感受到的阻力矩方向相反，
+ * 翻转 MOTOR_YAW_DIR 符号即可。
  *
  * 反饱和策略：当任一电机输出超出 DShot 范围时，
  * 四路统一平移 shift，保留差分关系（姿态力矩），再做限幅。
  */
+
+/* 偏航混控方向：+1 或 -1，台架验证后确定 */
+#define MOTOR_YAW_DIR (1.0f)
 
 /* 电机基础油门值 - 由遥控器摇杆提供 */
 uint16_t speed_temp = 0;
@@ -69,21 +76,23 @@ static uint16_t Motor_RampDownToMin(uint16_t current, uint16_t step)
  * base:  基础油门值（摇杆）
  * pitch: Pitch 轴 PID 修正量
  * roll:  Roll 轴 PID 修正量
+ * yaw:   Yaw 轴 PID 修正量（方向由 MOTOR_YAW_DIR 决定）
  * out_m1~out_m4: 四路输出（调用后写入）
  */
-static void Motor_MixWithDesaturation(float base, float pitch, float roll,
+static void Motor_MixWithDesaturation(float base, float pitch, float roll, float yaw,
                                       uint16_t *out_m1, uint16_t *out_m2,
                                       uint16_t *out_m3, uint16_t *out_m4)
 {
     float m1_raw, m2_raw, m3_raw, m4_raw;
     float max_raw, min_raw;
     float shift;
+    float yaw_term = yaw * MOTOR_YAW_DIR;
 
     /* 1) 混控矩阵 → 四路理想输出 */
-    m1_raw = base + pitch + roll;
-    m2_raw = base - pitch + roll;
-    m3_raw = base - pitch - roll;
-    m4_raw = base + pitch - roll;
+    m1_raw = base + pitch + roll + yaw_term;
+    m2_raw = base - pitch + roll - yaw_term;
+    m3_raw = base - pitch - roll + yaw_term;
+    m4_raw = base + pitch - roll - yaw_term;
 
     /* 2) 找四路极值 */
     max_raw = m1_raw;
@@ -128,7 +137,7 @@ static void Motor_MixWithDesaturation(float base, float pitch, float roll,
  * 在控制任务中周期性调用。
  *
  * Key == 1: 解锁运行
- *   - 读取 speed_temp（摇杆油门）+ 角速度 PID 输出
+ *   - 读取 speed_temp（摇杆油门）+ 三轴角速度 PID 输出
  *   - 油门越高，PID 补偿权重越大（高油门时姿态控制力被相对削弱）
  *   - 混控反饱和 → DShot 发送
  *
@@ -158,6 +167,7 @@ void Motor_Test(void)
         Motor_MixWithDesaturation((float)speed_temp,
                                   pid_rate_pitch.output * pid_comp_scale,
                                   pid_rate_roll.output * pid_comp_scale,
+                                  pid_rate_yaw.output * pid_comp_scale,
                                   &m1, &m2, &m3, &m4);
 
         Motor_Output[0] = m1;
@@ -173,6 +183,7 @@ void Motor_Test(void)
         /* 清零 PID 输出，防止停机过程姿态修正干扰 */
         pid_rate_pitch.output = 0.0f;
         pid_rate_roll.output = 0.0f;
+        pid_rate_yaw.output   = 0.0f;
 
         const uint16_t ramp_step = 8U;
         static uint8_t ramp_div = 0U;

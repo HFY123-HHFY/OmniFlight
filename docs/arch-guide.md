@@ -29,12 +29,11 @@
               ↓
 ┌────────────────────────────────────────┐
 │  app/           应用层 — 飞控核心算法   │
-│  Control/       串级PID + 混控 + 陀螺校准│
+│  Control/       串级PID(含偏航角速度环) │
+│                 + 混控 + 陀螺校准       │
 │  Control_Task/  RTOS 任务 + ISR 回调    │  5 任务调度 + 信号量/互斥锁
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
-│  IMU/           偏航角互补滤波融合       │
-│  Altitude/      高度互补滤波融合         │
 │  My_Usart/      串口管理 + printf       │
 └────────────────────────────────────────┘
               ↓
@@ -120,7 +119,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ TIM2 ISR (2ms, 优先级5) → xControlSem ──► ControlTask(6)            │
-│   500Hz：读姿态快照 → IMU 偏航积分 → 串级PID → 混控 → DShot          │
+│   500Hz：读姿态快照 → 串级PID + 偏航角速度环 → 混控 → DShot          │
 ├─────────────────────────────────────────────────────────────────────┤
 │ MPU6050 EXTI (200Hz, 优先级6) → xMpuSem ──► SensorTask(5)           │
 │   200Hz：I2C 读 DMP + 陀螺 + 加速度 → 互斥锁提交姿态全局变量          │
@@ -138,54 +137,52 @@ ControlTask 由 TIM2 信号量唤醒后立即抢占所有低优先级任务，�
 
 ```
 目标角度 (遥控器) → 角度环 PID (外环 500Hz) → 角速度环 PID (内环 500Hz) → 混控 → DShot
+Pitch/Roll 串级；偏航轴为单角速度环（见 §5.3）
 ```
 
 - 外环：Pitch/Roll 角度 → 角速度目标（Out_max=±400°/s）
 - 内环：gyrox/gyroy 去偏+低通 → 电机输出（Out_max=2047）
-- 低通：alpha=0.45，截止频率 ~36Hz@500Hz
+- 偏航：gyroz 去偏+低通 → 角速度 PID → 混控 yaw 项（Out_max=500，单环）
+- 低通：Pitch/Roll alpha=0.45，Yaw alpha=0.20（截止约 20Hz@500Hz，三轴各一个实例）
 
-### 5.3 偏航角融合 (IMU)
+### 5.3 偏航角速度环
 
-MPU6050 DMP Yaw 存在长期漂移，改用互补滤波：
-
-```
-yaw += (gyro_z - bias) * dt        ← 陀螺积分 500Hz (ControlTask)
-yaw += Kp * (mag - yaw)            ← 磁力计校正 50Hz (任务，QMC 数据到达时)
-bias -= Ki * (mag - yaw)           ← 零偏在线补偿
-```
-
-- Kp=0.15, Ki=0.002
-- 上电 5 秒自动采集 gyro_z 零偏（ControlTask 内 500Hz×5s=2500 样本）
-- 首次 QMC 数据直达起点，无收敛延迟
-- 输出：`IMU_Yaw` 全局变量 (0~360°)，替代 DMP Yaw
-- `IMU_Init()` 可选：静态状态默认已零初始化，ControlTask 首次调用自动开始零偏采集
-
-### 5.4 高度融合 (Altitude)
-
-BMP280 气压计噪声 ±1m 且响应慢，加速度计 Z 轴积分短期精确但长期发散。互补滤波融合：
+偏航轴控制目标：消除自旋（目标角速度恒 0，`Target_Yaw_Rate` 全局变量供后续遥控写入）。
+单角速度环（无角度外环），500Hz 在 ControlTask 内计算：
 
 ```
-pos += vel * dt                         ← 速度积分 (20Hz)
-vel += (aacz - gravity_ref) * G_SCALE * dt  ← 加速度积分
-pos += Kp * (baro_alt - pos)            ← 气压计 P 校正
-vel += Ki * (baro_alt - pos)            ← 速度零偏 I 校正
+gyroz (LSB) → 去零偏 → deg/s → 低通 → PID (kp=2.0, ki=0.05) → 混控 yaw 项
 ```
 
-- Kp=0.4, Ki=0.2, 调用频率 20Hz（BMP 数据到达的任务周期）
-- `gravity_ref` 与陀螺零偏同步采集（同一次 5s 静止），无额外等待
-- 输出：`Alt_Fused` — 融合高度 (m)，钳位 >= 0
-- `Altitude_Init()` 在 `GyroBias_Calibrate` 之后调用，接收重力参考值
+- gyro_z 零偏在上电 `GyroBias_Calibrate()` 内与 X/Y 同步校准（1000 样本平均）
+- PID：`pid_rate_yaw`，Out_max=500（偏航力矩靠反扭矩差，权限远弱于俯仰/滚转）
+- 抗抖设计（台架实测：静止偶发单拍跳变 + 转动测试积分残留导致电机卡顿）：
+  - 低通 alpha=0.20（截止约 20Hz@500Hz，比俯仰/滚转的 0.45 更狠，抗振动毛刺）
+  - 角速度死区 3dps（PID 库 `PID_SetDeadband`，|rate|≤3 视为 0，积分同时冻结）
+  - 输出死区 10（|yaw_out|≤10 清零），死区内每拍 error_sum×0.99 泄放积分
+  - 积分分离阈值 30dps（转动测试时不积分，防残留）
+- 混控：`M1/M3` 对角 +yaw，`M2/M4` 对角 −yaw，方向宏 `MOTOR_YAW_DIR`（Motor.c，
+  台架验证后若阻力矩方向相反则翻符号；最终以试飞为准：开了比不开转得更快 → 翻符号）
+- 解锁边沿 `Control_Arm_Reset` 同步重置 yaw PID 与低通
+- 历史：曾用 QMC5883P 磁力计互补滤波融合 IMU_Yaw（app/IMU），因地磁干扰不可靠已删除；
+  航向保持外环可后加（用 DMP 或陀螺积分短时航向，而非磁力计）
+
+### 5.4 高度/位置（后续工作）
+
+历史版本曾用 aacz + BMP280 互补滤波融合高度（app/Altitude），实测低空不可信已删除。
+当前高度方案定为 MTF02P ToF 测距 `mtf02p_data.distance`（mm，低空有效），
+位置方案定为光流 `flow_x/flow_y`（cm/s@1m，实际速度 = 光流速度 × 高度(m)），
+定高定点环待后续开发。BMP280/QMC5883P 驱动保留（未初始化），供高空高度/航向复用。
 
 ### 5.5 传感器校准
 
 | 传感器 | 校准方式 | 耗时 | 说明 |
 |--------|----------|:---:|------|
-| MPU6050 Gyro X/Y + 重力参考 | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U, &gravity_ref)` 同步采集 |
-| MPU6050 Gyro Z | IMU 互补滤波在线 PI | ~5s | ControlTask 自动完成 |
-| QMC5883P | 硬铁 offset + 软铁 scale (预存参数) | 瞬间 | `QMC_CAL_ENABLE=0` 使用头文件预存值 |
-| BMP280 | 地面气压归零 + EMA 跟踪 | 5s | `BMP280Init` 内部自动执行 |
+| MPU6050 Gyro X/Y/Z | 上电静止采集 1000 帧 | ~5s | `GyroBias_Calibrate(1000U)` 三轴同步校准，Z 供偏航环去偏 |
+| QMC5883P | 硬铁 offset + 软铁 scale (预存参数) | 瞬间 | 驱动保留，当前未初始化（磁干扰不可靠） |
+| BMP280 | 地面气压归零 + EMA 跟踪 | 5s | 驱动保留，当前未初始化（低空不可靠） |
 
-总启动时间：约 10 秒（陀螺+重力 5s + BMP 5s）
+总启动时间：约 5 秒（陀螺三轴零偏）
 
 > RTOS 说明：校准类函数在**调度器启动前**调用，采样节拍用 `Delay_ms`（DWT 忙等，
 > 不与 RTOS tick 冲突），不再依赖 EXTI 标志位轮询。
@@ -210,7 +207,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
 | 任务 | 优先级 | 频率 | 唤醒方式 | 职责 |
 |------|:---:|:---:|----------|------|
-| ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → IMU 积分 → 串级 PID → 混控 |
+| ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → 串级 PID（含偏航角速度环）→ 混控 |
 | SensorTask | 5 | 200Hz | xMpuSem（EXTI ISR） | I2C 读 DMP/陀螺/加速度 → 提交全局姿态 |
 | Mtf02pTask | 4 | 2ms 轮询 | xTaskDelayUntil | MTF02P_Task Micolink 协议解析（距离+光流） |
 | RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
@@ -295,14 +292,12 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 |------|--------|------|
 | LED | API_GPIO | Enroll 注册，校准状态指示 |
 | MPU6050 | API_I2C + EXTI | DMP 姿态解算 + 陀螺原始值 |
-| QMC5883P | API_I2C + Delay | 地磁航向（含硬铁/软铁校准，计时用 Delay_GetMs） |
-| BMP280 | API_I2C | 气压高度（含地面归零校准） |
+| QMC5883P | API_I2C + Delay | 地磁航向（含硬铁/软铁校准）— 驱动保留，当前未初始化 |
+| BMP280 | API_I2C | 气压高度（含地面归零校准）— 驱动保留，当前未初始化 |
 | NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
 | MTF02P | 无（纯协议解析） | Micolink 光流测距一体化（USART4）：距离 mm + 光流 cm/s@1m + 质量状态 |
-| IMU | MPU6050 + QMC5883P | 偏航角互补滤波融合 |
-| Altitude | MPU6050 + BMP280 | 高度互补滤波融合 (aacz + 气压计) |
 | Dshot | Core f407_pwm + f407_dma | DShot300 油门 |
-| Motor | Dshot + Control | 电机混控反饱和 |
+| Motor | Dshot + Control | 电机混控反饱和（三轴 PID → X 型矩阵，含 yaw 对角项） |
 | Buzzer | API_PWM | 无源蜂鸣器 |
 
 ---
@@ -319,7 +314,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 8. **延时选型**：软件 I2C/SPI 的 µs 级 bit-bang 时序必须用 `Delay_us`（DWT 忙等）；任务级 ms 休眠用 `vTaskDelay/xTaskDelayUntil`
 9. **上电静止**：飞行器需静止 ~10s（陀螺+重力 5s + BMP 5s）完成所有传感器校准
 10. **I2C 总线**：所有 I2C 读写仅在任务上下文，ISR 不触碰 I2C（硬件 I2C 不可重入）
-11. **BMP280 地面跟踪**：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁
+11. **BMP280 地面跟踪**：驱动保留未启用。若重新启用：未解锁时 EMA 持续跟踪地面气压，解锁后冻结。飞完降落后**必须先锁定等 2s alt 归零**再重新解锁
 12. **控制节拍依赖 TIM2**：TIM2 停则 ControlTask 永不唤醒，飞行中调试断点勿停在 TIM2 ISR 内
 13. **栈溢出钩子**：`configCHECK_FOR_STACK_OVERFLOW=2` 开启，任务栈不足会进入 `vApplicationStackOverflowHook` 死循环（关中断），用调试器看 `pcTaskName` 定位
 14. **MTF-02P 数据语义**：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 `MTF02P_IsRangeValid()` / `MTF02P_IsFlowValid()`（对应 tof_status / flow_status）
@@ -333,11 +328,10 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 3. [A_Entry/main.c](A_Entry/main.c) — 飞控初始化 → RTOS 调度器启动
 4. [A_Entry/FreeRTOSConfig.h](A_Entry/FreeRTOSConfig.h) — 内核配置（中断优先级分区 / 堆 / API 开关）
 5. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
-6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID + 陀螺校准
+6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID（含偏航角速度环）+ 陀螺三轴零偏校准
 7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 5 任务 + 信号量/互斥锁 + ISR 回调
-8. [app/IMU/IMU.c](app/IMU/IMU.c) — 偏航角互补滤波融合
-9. [app/Altitude/Altitude.c](app/Altitude/Altitude.c) — 高度互补滤波融合
-10. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
-11. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级（FreeRTOS 分区）
-12. [Middlewares/FreeRTOS-Kernel/](Middlewares/FreeRTOS-Kernel/) — vendored 内核 V11.1.0
-13. [CMakeLists.txt](CMakeLists.txt) — 构建入口
+8. [BSP/Motor/Motor.c](BSP/Motor/Motor.c) — 三轴混控（X 型矩阵 + yaw 对角项 + MOTOR_YAW_DIR）
+9. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
+10. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级（FreeRTOS 分区）
+11. [Middlewares/FreeRTOS-Kernel/](Middlewares/FreeRTOS-Kernel/) — vendored 内核 V11.1.0
+12. [CMakeLists.txt](CMakeLists.txt) — 构建入口

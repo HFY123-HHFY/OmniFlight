@@ -25,6 +25,9 @@ extern float Target_Pitch;
 extern float Target_Roll;
 extern float Target_Yaw;
 
+/* 目标偏航角速度 (deg/s)。当前恒 0 用于消除自旋，后续由遥控器写入。 */
+extern float Target_Yaw_Rate;
+
 /* 外环 PID：角度。 */
 extern PID_TypeDef pid_pitch;
 extern PID_TypeDef pid_roll;
@@ -32,6 +35,7 @@ extern PID_TypeDef pid_roll;
 /* 内环 PID：角速度。 */
 extern PID_TypeDef pid_rate_pitch;
 extern PID_TypeDef pid_rate_roll;
+extern PID_TypeDef pid_rate_yaw;
 
 /* 高度环 */
 extern PID_TypeDef pid_alt;
@@ -46,17 +50,20 @@ void PID_Contorl_Init(void);
 
 /*
  * 陀螺零偏校准（上电后调用一次，飞行器必须静止）。
- * samples        : 采样点数（建议 1000，约 5s）
- * gravity_ref_out: 输出重力参考值 (aacz 均值)，可为 NULL
- * 返回 1 成功，0 超时失败。
+ * samples: 采样点数（建议 1000，约 5s）。
+ * 同时校准 X/Y/Z 三轴，Z 轴零偏供偏航角速度环使用。
+ * 返回 1 完成（采样不再依赖 EXTI 标志，无超时概念）。
  */
-uint8_t GyroBias_Calibrate(uint16_t samples, float *gravity_ref_out);
+uint8_t GyroBias_Calibrate(uint16_t samples);
 
 /* 查询校准是否完成。 */
 uint8_t GyroBias_IsReady(void);
 
-/* 手动设置陀螺零偏（仅 X/Y 轴，单位：原始 LSB）。Z 轴零偏由 IMU 在线估计。 */
+/* 手动设置陀螺零偏（仅 X/Y 轴，单位：原始 LSB）。 */
 void Set_Gyro_Bias(float bias_x, float bias_y);
+
+/* 获取 Z 轴陀螺零偏（原始 LSB），调试用。 */
+float Get_Gyro_Bias_Z(void);
 
 /* 解锁时重置 PID 内部状态 + 低通滤波器，防止地面噪声污染导致解锁瞬态。 */
 void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps);
@@ -66,6 +73,13 @@ void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps
  * 校准已独立完成，此函数不再包含校准逻辑。
  */
 void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll);
+
+/*
+ * 偏航角速度环 PID 控制（单环，500Hz）。
+ * gyro_z_dps: Z 轴角速度（deg/s），已由调用方转换为 deg/s，内部再做零偏扣除。
+ * 输出写入 pid_rate_yaw.output，由混控层加载 yaw 项。
+ */
+void PID_Yaw_Rate_Control(float gyro_z_dps);
 
 #ifdef __cplusplus
 }
