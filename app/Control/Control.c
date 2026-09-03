@@ -96,6 +96,7 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 	float gyro_sum_y = 0.0f;
 	float gyro_sum_z = 0.0f;
 	uint16_t i;
+	LED_Level_t led3Level = LED_HIGH;
 
 	if (samples == 0U)
 	{
@@ -105,6 +106,11 @@ uint8_t GyroBias_Calibrate(uint16_t samples)
 	for (i = 0U; i < samples; i++)
 	{
 		Delay_ms(5U);   /* 固定 5ms 采样节拍 = 200Hz，与 DMP 输出率一致 */
+		if (((i + 1U) % 100U) == 0U)
+		{
+			led3Level = (led3Level == LED_HIGH) ? LED_LOW : LED_HIGH;
+			LED_Control(LED3, led3Level);
+		}
 
 		mpu_dmp_get_data(&Pitch, &Roll, &Yaw);
 		MPU_Get_Gyroscope(&gyrox, &gyroy, &gyroz);

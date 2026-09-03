@@ -36,6 +36,9 @@ extern uint8_t NRF24L01_TxPacket[NRF24L01_TX_PACKET_WIDTH];
 extern uint8_t NRF24L01_RxAddress[NRF24L01_ADDR_WIDTH];
 extern uint8_t NRF24L01_RxPacket[NRF24L01_RX_PACKET_WIDTH];
 
+/* 遥控链路状态：收到有效遥控数据包时为 1，超时未收到时为 0。 */
+extern volatile uint8_t NRF24L01_Linked;
+
 /* 注册 NRF24L01 专有控制脚（CE）。 */
 void NRF24L01_RegisterCtrl(const NRF24L01_CtrlConfig_t *configTable, uint8_t count);
 

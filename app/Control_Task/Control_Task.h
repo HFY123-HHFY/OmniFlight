@@ -8,12 +8,13 @@
 /*
  * Control_Task.h — RTOS 任务调度模块（替代裸机的前后台标志位调度）
  *
- * 任务模型（5 个任务，优先级 2~6；0 为 idle，软件定时器服务任务与 TelemetryTask 同为 2）：
+ * 任务模型（6 个任务，优先级 1~6；0 为 idle）：
  *   ControlTask(6)  — 500Hz 姿态控制，TIM2 信号量唤醒
  *   SensorTask(5)   — 200Hz MPU6050 DMP 读取，EXTI 信号量唤醒
  *   Mtf02pTask(4)   — MTF-02P 光流测距 Micolink 协议解析，vTaskDelayUntil 轮询
  *   RadioTask(3)    — 100Hz NRF24L01 遥控+遥测，vTaskDelayUntil
  *   TelemetryTask(2)— 10Hz 串口打印，vTaskDelayUntil
+ *   LEDTask(1)      — LED 状态指示，vTaskDelayUntil
  *
  * ISR 回调（仅做信号量/通知，不跑业务逻辑）：
  *   Control_Task1_Callback — TIM2 500Hz 给控制信号量

@@ -198,6 +198,86 @@ static void TelemetryTask(void *pvParameters)
 }
 
 /* ────────────────────────────────────────────────────────────────
+ * LEDTask — LED 状态指示（最低应用优先级 1）
+ *
+ * 状态优先级从高到低：断链绿色闪烁、解锁 RGB 交替、锁定红色闪烁、
+ * 已连接待命绿色常亮。每次切换状态先关闭全部 LED，避免旧状态残留。
+ * ──────────────────────────────────────────────────────────────── */
+static void LEDTask(void *pvParameters)
+{
+	uint8_t tickCount = 0U;
+	uint8_t effectStep = 0U;
+	uint8_t lastMode = 0xFFU;
+	uint8_t mode;
+
+	(void)pvParameters;
+
+	for (;;)
+	{
+		if (NRF24L01_Linked == 0U)
+		{
+			mode = 0U; /* 断链：绿色闪烁 */
+		}
+		else if (Key == 1U)
+		{
+			mode = 1U; /* 解锁：RGB 交替 */
+		}
+		else if (Key == 2U)
+		{
+			mode = 2U; /* 锁定：红色闪烁 */
+		}
+		else
+		{
+			mode = 3U; /* 已连接待命：绿色常亮 */
+		}
+
+		if (mode != lastMode)
+		{
+			LED_Control(LED1, LED_LOW);
+			LED_Control(LED2, LED_LOW);
+			LED_Control(LED3, LED_LOW);
+			tickCount = 0U;
+			effectStep = 0U;
+			lastMode = mode;
+
+			if (mode == 3U)
+			{
+				LED_Control(LED1, LED_HIGH);
+			}
+		}
+		else if ((mode == 0U) || (mode == 1U) || (mode == 2U))
+		{
+			tickCount++;
+			if (tickCount >= 5U) /* LEDTask 100ms 一次，5 次为 500ms */
+			{
+				tickCount = 0U;
+
+				if (mode == 0U)
+				{
+					LED_Control(LED1, (effectStep == 0U) ? LED_HIGH : LED_LOW);
+					effectStep = (effectStep == 0U) ? 1U : 0U;
+				}
+				else if (mode == 2U)
+				{
+					LED_Control(LED2, (effectStep == 0U) ? LED_HIGH : LED_LOW);
+					effectStep = (effectStep == 0U) ? 1U : 0U;
+				}
+				else
+				{
+					LED_Control(LED1, LED_LOW);
+					LED_Control(LED2, LED_LOW);
+					LED_Control(LED3, LED_LOW);
+					LED_Control((LED_Id_t)(LED1 + effectStep), LED_HIGH);
+					effectStep = (effectStep + 1U) % 3U;
+				}
+			}
+		}
+
+		vTaskDelay(pdMS_TO_TICKS(100));
+	}
+}
+
+/* ────────────────────────────────────────────────────────────────
  * Control_Task_RTOSInit — 创建所有 RTOS 对象
  *
  * 必须在 main() 中硬件外设（TIM2/MPU6050 EXTI）启动前调用，确保 ISR 给信号量时对象已存在。
@@ -218,6 +298,7 @@ void Control_Task_RTOSInit(void)
 	xTaskCreate(Mtf02pTask,     "Mtf02p",   256, NULL, 4, NULL);
 	xTaskCreate(RadioTask,      "Radio",    256, NULL, 3, NULL);
 	xTaskCreate(TelemetryTask,  "Telem",    256, NULL, 2, NULL);
+	xTaskCreate(LEDTask,        "LED",      256, NULL, 1, NULL);
 }
 
 /* ────────────────────────────────────────────────────────────────

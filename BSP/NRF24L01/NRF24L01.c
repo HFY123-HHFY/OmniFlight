@@ -430,6 +430,11 @@ static uint8_t SendFlag = 0;						//发送标志位
 static uint8_t ReceiveFlag = 0;						//接收标志位
 static uint8_t s_telemetryRequest = 0;				//遥控器回传请求标志
 volatile int8_t R_H = 0; // 右边摇杆纵向偏移量（-100~100）
+volatile uint8_t NRF24L01_Linked = 0U;
+static uint16_t s_linkMissCount = 0U;
+
+/* 100Hz 轮询下，连续 500ms 未收到数据包即判定遥控器断链。 */
+#define NRF24L01_LINK_TIMEOUT_TICKS 50U
 
 //接收数据包：解析遥控指令，每收到一包都回传遥测
 void NRF24L01_RX_Data(void)
@@ -437,8 +442,19 @@ void NRF24L01_RX_Data(void)
 	ReceiveFlag = NRF24L01_Receive();
 	if (ReceiveFlag != 1)
 	{
+		if (s_linkMissCount < NRF24L01_LINK_TIMEOUT_TICKS)
+		{
+			s_linkMissCount++;
+		}
+		if (s_linkMissCount >= NRF24L01_LINK_TIMEOUT_TICKS)
+		{
+			NRF24L01_Linked = 0U;
+		}
 		return;
 	}
+
+	s_linkMissCount = 0U;
+	NRF24L01_Linked = 1U;
 
 	//收到任意遥控数据包都回传遥测
 	s_telemetryRequest = 1;

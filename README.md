@@ -14,7 +14,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 
 - 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
-- 🖥️ **FreeRTOS 实时内核** — 5 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
+- 🖥️ **FreeRTOS 实时内核** — 6 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
 - 🎛️ **串级 PID** — 外环角度 + 内环角速度（Pitch/Roll）+ 偏航角速度环（gyro_z 消除自旋），500Hz 控制节拍
 - 📡 **姿态测量** — MPU6050 DMP (Pitch/Roll) + gyro_z 零偏校准偏航角速度环
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
@@ -59,7 +59,7 @@ OmniFlight/
 │  FreeRTOSConfig.h            # 内核配置（中断优先级分区 / 堆 / API 开关）
 ├─ app/
 │  ├─ Control/                 # 串级 PID + 混控 + 陀螺校准
-│  ├─ Control_Task/            # RTOS 任务 + ISR 回调（5 任务调度）
+│  ├─ Control_Task/            # RTOS 任务 + ISR 回调（6 任务调度）
 │  ├─ PID/                     # PID 控制器
 │  ├─ Filter/                  # 低通/互补滤波器
 │  └─ My_Usart/                # 串口管理 + printf
@@ -99,12 +99,13 @@ OmniFlight/
    500Hz            500Hz           X 型四轴
 Pitch/Roll 串级 │ 偏航角速度环 (gyro_z 单环, 消除自旋)
 
-FreeRTOS 任务模型（5 任务，优先级 6→2）：
+FreeRTOS 任务模型（6 任务，优先级 6→1）：
   TIM2 ISR ─信号量→ ControlTask(6)  500Hz 串级PID + 偏航角速度环 + 混控
   EXTI    ─信号量→ SensorTask(5)    200Hz 读 MPU6050 DMP/陀螺/加速度
   Mtf02pTask(4) 2ms  MTF-02P Micolink 协议解析
   RadioTask(3) 10ms  NRF24L01 遥控+遥测
   TelemetryTask(2) 100ms 串口打印
+  LEDTask(1) 100ms LED 状态指示（断链绿色闪烁 / 解锁 RGB 交替 / 锁定红色闪烁）
 
 传感器数据流：
   MPU6050 DMP (200Hz) → Pitch/Roll → 角度环

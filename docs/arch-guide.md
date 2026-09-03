@@ -31,7 +31,7 @@
 │  app/           应用层 — 飞控核心算法   │
 │  Control/       串级PID(含偏航角速度环) │
 │                 + 混控 + 陀螺校准       │
-│  Control_Task/  RTOS 任务 + ISR 回调    │  5 任务调度 + 信号量/互斥锁
+│  Control_Task/  RTOS 任务 + ISR 回调    │  6 任务调度 + 信号量/互斥锁
 │  PID/           PID 控制器              │
 │  Filter/        低通/互补滤波器         │
 │  My_Usart/      串口管理 + printf       │
@@ -127,10 +127,11 @@
 │ Mtf02pTask(4)    2ms 轮询   → MTF02P_Task() Micolink 协议解析 (USART4 115200) │
 │ RadioTask(3)     10ms 周期  → NRF24L01_Data() 遥控+遥测 (100Hz)      │
 │ TelemetryTask(2) 100ms 周期 → usart_printf（xPrintMutex 保护）       │
+│ LEDTask(1)      100ms 周期 → LED 状态机（最低应用优先级）             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-任务优先级 6（最高）→ 2（最低），0 为 idle，软件定时器服务任务与 TelemetryTask 同为 2（时间片轮转）。抢占式调度：
+任务优先级 6（最高）→ 1（最低应用优先级），0 为 idle，软件定时器服务任务与 TelemetryTask 同为 2（时间片轮转）。抢占式调度：
 ControlTask 由 TIM2 信号量唤醒后立即抢占所有低优先级任务，保证 500Hz 控制节拍抖动最小。
 
 ### 5.2 串级 PID 架构
@@ -212,6 +213,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 | Mtf02pTask | 4 | 2ms 轮询 | xTaskDelayUntil | MTF02P_Task Micolink 协议解析（距离+光流） |
 | RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
 | TelemetryTask | 2 | 100ms | xTaskDelayUntil | usart_printf 遥测打印 |
+| LEDTask | 1 | 100ms | xTaskDelay | 链路、解锁、锁定状态 LED 指示 |
 
 | 同步对象 | 类型 | 保护内容 |
 |----------|------|----------|
