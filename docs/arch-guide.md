@@ -171,6 +171,11 @@ gyroz (LSB) → 去零偏 → deg/s → 低通 → PID (kp=2.0, ki=0.05) → 混
 
 ### 5.4 定高环（MTF02P ToF）
 
+> ✅ **状态：2026-09-05 实测可定高**。最终参数：ALT_DEV_OUT_MAX=600（预设基准）、
+> 内环 kp=600/ki=150、外环 kp=1.0（main.c Set_PID 调参，与 Pitch/Roll/偏航环同模式）。
+> Key==1 = speed_temp 油门摇杆打底 + 定高偏差；Key==3 = 预设基准 + 定高偏差。
+> 调参经验：基准/增益偏小时拉满 R_H 也飞不起来；DShot 电调需从 48 逐步递增，勿大跳变。
+
 历史版本曾用 aacz + BMP280 互补滤波融合高度（app/Altitude），实测低空不可信已删除；
 高度方案改为 MTF02P ToF 测距。BMP280/QMC5883P 驱动保留（未初始化），供高空高度/航向复用。
 
@@ -236,7 +241,24 @@ MTF02P distance(mm) ──────────┬──────┤
     仍不够 → 加大 kp/ALT_DEV_OUT_MAX）；若悬停后仍缓漂 → 加大 ki
 - 注意：数据失效期间冻结输出（保持最后一拍油门），应尽快降落或 Key==2 停机
 
-### 5.5 传感器校准
+### 5.5 定点环（下一目标，规划中）
+
+**数据源**：MTF02P 光流 flow_x / flow_y（单位 cm/s @1m）——传感器在 1m 高度标定，
+实际水平速度(cm/s) = flow × 当前高度(m)；高度用本模块 distance（定高已实测，可信）。
+数据可用性：`MTF02P_IsFlowValid()`（flow_status==1）；flow_quality 低时纹理不可信。
+
+**规划架构**（待下一轮细化，与定高环同构的思路）：
+- 水平速度环（PI）：光流速度 → 目标倾角指令（Pitch/Roll 角），限幅 ±10° 左右
+  —— 速度环输出直接写入 Target_Pitch / Target_Roll，复用现成串级 PID 外环入口
+- 位置环（可选）：速度环外层再积分位置误差 → 实现"定点悬停"而非仅"速度阻尼"
+- 与定高环的差异：定高环是"高度→速率→油门"；定点环是"位置→速度→倾角"，
+  中间借用同样的串级思想，滤波/死区/限幅参数沿用 Alt_Cfg_t 的结构体风格
+- 注意：
+  - 光流在低空（<0.5m）贴地时噪声大、高空（>4m）标定失效，与定高量程一致
+  - 地面纹理差（纯色地板）flow_quality 低 → 速度环应暂停输出（冻结/回中）
+  - 偏航环消除自旋是定点前提（机身不转，光流坐标才稳定）
+
+### 5.6 传感器校准
 
 | 传感器 | 校准方式 | 耗时 | 说明 |
 |--------|----------|:---:|------|
@@ -249,7 +271,7 @@ MTF02P distance(mm) ──────────┬──────┤
 > RTOS 说明：校准类函数在**调度器启动前**调用，采样节拍用 `Delay_ms`（DWT 忙等，
 > 不与 RTOS tick 冲突），不再依赖 EXTI 标志位轮询。
 
-### 5.6 DShot300 油门协议
+### 5.7 DShot300 油门协议
 
 - TIM1 配置为 300kHz PWM 基波（ARR=560, PSC=1）
 - DMA2 Stream5 burst 模式，每次 TIM1 溢出自动更新 CCR1~CCR4
@@ -257,7 +279,7 @@ MTF02P distance(mm) ──────────┬──────┤
 - 油门范围：48~2047（0 停转，1~47 为保留命令区）
 - **重要**：电调需要从最低油门（48）逐步递增，不可直接跳到大油门值
 
-### 5.7 ISR 回调架构
+### 5.8 ISR 回调架构
 
 ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
@@ -265,7 +287,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 - `ControlTask_NotifyMpuIsr` → MPU6050 EXTI ISR → `xSemaphoreGiveFromISR` 唤醒 SensorTask（200Hz）
 - `Control_Task_USART_Callback` → USART1~4 → TX 队列排空 + RX 按串口分发（FreeRTOS 不感知，不调任何 RTOS API）；USART4 数据 → `MTF02P_RxPush` 入队，解析在 Mtf02pTask
 
-### 5.8 RTOS 对象一览
+### 5.9 RTOS 对象一览
 
 | 任务 | 优先级 | 频率 | 唤醒方式 | 职责 |
 |------|:---:|:---:|----------|------|
@@ -283,7 +305,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 | xAttitudeMutex | 互斥锁（优先级继承） | Pitch/Roll/Yaw/gyrox/y/z/aacx/y/z（SensorTask 写 / ControlTask 读） |
 | xPrintMutex | 互斥锁 | printf 串口输出防交织 |
 
-### 5.9 FreeRTOS 接管设计要点
+### 5.10 FreeRTOS 接管设计要点
 
 - **启动流程**：main 初始化外设 → `Control_Task_RTOSInit()`（信号量/互斥锁/任务必须先于 ISR 源创建）→ `vTaskStartScheduler()` → SVC 启动第一个任务，SysTick/PendSV 移交内核
 - **中断优先级分区**：`configMAX_SYSCALL_INTERRUPT_PRIORITY=5`。USART=4 设为「不感知」（永不被内核临界区屏蔽，异步 TX 零丢包，但严禁调 RTOS API）；TIM2=5、EXTI=6 为「感知」（可调 FromISR API）
@@ -358,7 +380,7 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 | QMC5883P | API_I2C + Delay | 地磁航向（含硬铁/软铁校准）— 驱动保留，当前未初始化 |
 | BMP280 | API_I2C | 气压高度（含地面归零校准）— 驱动保留，当前未初始化 |
 | NRF24L01 | API_SPI + Enroll CE | 2.4G 遥控遥测（软件 SPI） |
-| MTF02P | 无（纯协议解析） | Micolink 光流测距一体化（USART4）：距离 mm + 光流 cm/s@1m + 质量状态 |
+| MTF02P | 无（纯协议解析） | Micolink 光流测距一体化（USART4）：距离 mm + 光流 cm/s@1m + 质量状态（光流定点规划中，见 §5.5） |
 | Dshot | Core f407_pwm + f407_dma | DShot300 油门 |
 | Motor | Dshot + Control | 电机混控反饱和（三轴 PID → X 型矩阵，含 yaw 对角项） |
 | Buzzer | API_PWM | 无源蜂鸣器 |

@@ -15,11 +15,11 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 - 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
 - 🖥️ **FreeRTOS 实时内核** — 6 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
-- 🎛️ **串级 PID** — 外环角度 + 内环角速度（Pitch/Roll）+ 偏航角速度环（gyro_z 消除自旋）+ 定高环（MTF02P ToF 距离），500Hz 控制节拍
+- 🎛️ **串级 PID** — 外环角度 + 内环角速度（Pitch/Roll）+ 偏航角速度环（gyro_z 消除自旋）+ 定高环（MTF02P ToF 距离，✅ 已实测定高），500Hz 控制节拍
 - 📡 **姿态测量** — MPU6050 DMP (Pitch/Roll) + gyro_z 零偏校准偏航角速度环
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
 - 🛰️ **2.4G 遥控** — NRF24L01 软件 SPI 无线收发，双向遥测回传
-- 🛸 **光流测距** — MTF-02P Micolink 协议（USART4），距离 mm + 光流速度 cm/s@1m，定高环数据源（光流定点后续）
+- 🛸 **光流测距** — MTF-02P Micolink 协议（USART4），距离 mm + 光流速度 cm/s@1m，定高环数据源（已实测定高；🎯 光流定点为下一目标）
 - ⚙️ **注册层（Enroll）** — X-Macro 编译期映射，换 MCU 只改一张配置表
 - 🚌 **软件总线** — I2C/SPI 协议与底层分离，速率集中配置
 
@@ -113,8 +113,20 @@ FreeRTOS 任务模型（6 任务，优先级 6→1）：
   MPU6050 DMP (200Hz) → Pitch/Roll → 角度环
   MPU6050 Gyro (500Hz) → gyrox/gyroy → Pitch/Roll 角速度环
   MPU6050 Gyro (500Hz) → gyroz → 偏航角速度环（零偏校准 + 低通 + PID）
-  MTF02P (~100Hz) → distance (mm) → 定高环（差分+低通估爬升速率；flow_x/y 定点预留）
+  MTF02P (~100Hz) → distance (mm) → 定高环（✅ 已实测；差分+低通估爬升速率）
+  MTF02P (~100Hz) → flow_x/y (cm/s@1m) → 定点环（🎯 下一目标，架构见 arch-guide §5.5）
 ```
+
+## 🏆 开发进度（里程碑）
+
+| 里程碑 | 状态 |
+|--------|------|
+| 2.4G 遥控通信（NRF24L01 双向遥测） | ✅ |
+| 串级 PID 正常起飞 | ✅ |
+| 偏航角速度环（gyro_z）消除自旋 | ✅ |
+| LED 控制管理任务（状态指示） | ✅ |
+| **定高环（MTF02P ToF）** | ✅ 2026-09-05 实测 |
+| 🎯 光流定点（MTF02P flow_x/flow_y） | ⬜ 下一目标 |
 
 ## 🎯 中断优先级
 
@@ -151,7 +163,7 @@ cmake --build --preset Debug
 - 遥控状态由 Key（RxPacket[0]）切换：1=解锁（油门摇杆 speed_temp 打底 + R_H 定高环偏差修正）；2=锁定停机；3=解锁+预设基准（base = ALT_DEV_OUT_MAX + 偏差输出，PID 只出修正不累）
 - 定高环唯一宏 ALT_DEV_OUT_MAX（Control.h）= 预设基准油门（约悬停油门 400），改这一处即改基准；其余参数（节拍/死区/限幅/抗扰）在 Control.h 的 Alt_Cfg_t 结构体；PID 增益与别的环一致在 main.c 用 Set_PID 调参
 - 空中 Key 1↔3 切换会使 base 阶跃 ±ALT_DEV_OUT_MAX，请勿空中切换；Key==1 时油门摇杆 speed_temp 参与打底，Key==3 由预设基准替代
-- 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.9）
+- 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.10）
 - 只有优先级 ≥5 的中断可调用 FreeRTOS FromISR API；USART 回调内严禁调用
 - MTF-02P 数据语义：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 tof_status / flow_status
 
