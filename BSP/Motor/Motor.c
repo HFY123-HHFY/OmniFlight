@@ -20,7 +20,9 @@
 /* 偏航混控方向：+1 或 -1，台架验证后确定 */
 #define MOTOR_YAW_DIR (1.0f)
 
-/* 电机基础油门值 - 由遥控器摇杆提供 */
+/* 电机基础油门值 - 由遥控器油门摇杆提供（0~250 → 48~2047）。
+ * Key==1 解锁：直接作混控 base 的一部分（base = speed_temp + Alt_Throttle_Out）；
+ * Key==3 解锁+预设：不参与（base = ALT_DEV_OUT_MAX + Alt_Throttle_Out）。 */
 uint16_t speed_temp = 0;
 
 /* 4 路电机最终 DShot 油门输出 */
@@ -73,7 +75,7 @@ static uint16_t Motor_RampDownToMin(uint16_t current, uint16_t step)
  * 3) 整体平移 shift，保留姿态差分关系
  * 4) 最终限幅输出
  *
- * base:  基础油门值（摇杆）
+ * base:  基础油门值（Key==1 = speed_temp + Alt_Throttle_Out / Key==3 = ALT_DEV_OUT_MAX + Alt_Throttle_Out）
  * pitch: Pitch 轴 PID 修正量
  * roll:  Roll 轴 PID 修正量
  * yaw:   Yaw 轴 PID 修正量（方向由 MOTOR_YAW_DIR 决定）
@@ -136,8 +138,19 @@ static void Motor_MixWithDesaturation(float base, float pitch, float roll, float
  * 电机混控测试函数。
  * 在控制任务中周期性调用。
  *
- * Key == 1: 解锁运行
- *   - 读取 speed_temp（摇杆油门）+ 三轴角速度 PID 输出
+ * Key == 1: 解锁飞行
+ *   - base = speed_temp + Alt_Throttle_Out：
+ *     油门摇杆直接打底给油（推多少给多少），Alt_Throttle_Out 为
+ *     R_H 定高环 P+I 偏差修正，叠加在摇杆基准上
+ *
+ * Key == 3: 解锁 + 预设基准油门
+ *   - base = ALT_DEV_OUT_MAX + Alt_Throttle_Out：
+ *     预设基准（约悬停油门）出大力，Alt_Throttle_Out 为定高环 P+I
+ *     偏差修正，PID 只出偏差（不累）；speed_temp 不参与；
+ *   R_H 回中摇杆经定高环控高度（Key==1/3 均生效）。
+ *
+ * Key == 1/3 共用：
+ *   - 三轴角速度 PID 输出作姿态修正
  *   - 油门越高，PID 补偿权重越大（高油门时姿态控制力被相对削弱）
  *   - 混控反饱和 → DShot 发送
  *
@@ -153,18 +166,33 @@ void Motor_Test(void)
     static uint16_t m3 = DSHOT_THROTTLE_MIN;
     static uint16_t m4 = DSHOT_THROTTLE_MIN;
 
-    if (Key == 1)
+    if ((Key == 1) || (Key == 3))
     {
         /*
+         * base 按 Key 状态决定（由遥控器切换）：
+         *   Key==1 解锁      = speed_temp + Alt_Throttle_Out
+         *     —— 油门摇杆直接打底给油，R_H 定高环在摇杆基准上出偏差修正
+         *   Key==3 解锁+预设 = ALT_DEV_OUT_MAX + Alt_Throttle_Out
+         *     —— 预设基准油门出大力，PID 只出偏差修正（speed_temp 不参与）
+         *
          * 油门补偿：高油门时 PID 输出权重自动提升，
          * 防止姿态控制力被淹没在大油门输出中。
          */
-        float throttle_ratio = ((float)speed_temp - (float)DSHOT_THROTTLE_MIN)
+        float base = (float)speed_temp + Alt_Throttle_Out;
+        if (Key == 3)
+        {
+            base = ALT_DEV_OUT_MAX + Alt_Throttle_Out;
+        }
+        float throttle_ratio = (base - (float)DSHOT_THROTTLE_MIN)
                              / ((float)DSHOT_THROTTLE_MAX - (float)DSHOT_THROTTLE_MIN);
+        if (throttle_ratio < 0.0f)
+        {
+            throttle_ratio = 0.0f;  /* Key==1 起步 base 可能低于 DShot 下限 */
+        }
         /* 补偿系数范围 1.0 ~ 1.8，可根据实际机型调整 */
         float pid_comp_scale = 1.0f + 0.8f * throttle_ratio;
 
-        Motor_MixWithDesaturation((float)speed_temp,
+        Motor_MixWithDesaturation(base,
                                   pid_rate_pitch.output * pid_comp_scale,
                                   pid_rate_roll.output * pid_comp_scale,
                                   pid_rate_yaw.output * pid_comp_scale,
@@ -183,6 +211,7 @@ void Motor_Test(void)
         pid_rate_pitch.output = 0.0f;
         pid_rate_roll.output = 0.0f;
         pid_rate_yaw.output   = 0.0f;
+        Alt_Throttle_Out      = 0.0f;
 
         const uint16_t ramp_step = 8U;
         static uint8_t ramp_div = 0U;

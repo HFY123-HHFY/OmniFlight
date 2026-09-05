@@ -4,6 +4,8 @@
 #include "MPU6050.h"                    /* MPU_Get_Gyroscope */
 #include "My_Usart/My_Usart.h"          /* usart_printf */
 #include "KEY.h"
+#include "MTF02P.h"                     /* mtf02p_data / MTF02P_IsRangeValid（定高环） */
+#include "NRF24L01.h"                   /* R_H 摇杆（定高环） */
 
 /* =========================================================================
  * 目标姿态
@@ -44,6 +46,48 @@ static uint8_t s_gyro_bias_ready = 0U;
 #define YAW_INTEGRAL_DECAY    (0.99f) /* 死区内每拍积分泄放系数，防转动后残留输出 */
 
 /* =========================================================================
+ * 定高环（100Hz，MTF02P ToF 距离；Key==1 解锁 / Key==3 解锁+预设基准时生效）
+ *
+ * 结构：R_H 摇杆 → 速率指令积分进 Alt_Target_M（回中冻结 = 保持当前高度）
+ *       高度外环（纯 P）→ 爬升速率目标（+ 摇杆前馈，限幅）
+ *       速率内环（P+I）→ 油门偏差输出 Alt_Throttle_Out（±out_max）
+ *   混控 base（Motor.c）：
+ *     Key==1 解锁      = speed_temp + Alt_Throttle_Out（油门摇杆打底，R_H 定高环出偏差）
+ *     Key==3 解锁+预设 = ALT_DEV_OUT_MAX + Alt_Throttle_Out（预设基准出大力，
+ *                       PID 只出偏差修正）
+ *     Key==2 锁定      = 停机（本环不被调用，Motor_Test 缓降并清零输出）
+ *
+ * PID 增益与 Pitch/Roll/偏航环一致，在 main.c 用 Set_PID 调参；
+ * 定高环专属参数（节拍/死区/限幅/抗扰）收在 Alt_Cfg_t 结构体
+ * （类型见 Control.h，默认值由 Alt_Config_Init 加载）。
+ * ========================================================================= */
+
+Alt_Cfg_t s_alt_cfg;
+
+/* 定高环默认配置。唯一宏 ALT_DEV_OUT_MAX（预设基准油门）在 Control.h。 */
+static void Alt_Config_Init(void)
+{
+    s_alt_cfg.loop_div             = 5U;
+    s_alt_cfg.loop_dt_s            = 0.01f;
+    s_alt_cfg.rc_max_rate          = 1.0f;
+    s_alt_cfg.rc_deadband          = 5;
+    s_alt_cfg.pos_deadband_m       = 0.03f;
+    s_alt_cfg.rate_target_max      = 1.5f;
+    s_alt_cfg.i_max                = 8.0f;   /* ki=150 时 I_out 上限 ±1200 = out_max */
+    s_alt_cfg.out_max              = 2.0f * ALT_DEV_OUT_MAX; /* 偏差窗口 = 2×预设基准，I 学悬停差额够用 */
+    s_alt_cfg.rate_deadband_mps    = 0.10f;
+    s_alt_cfg.rate_sep_mps         = 1.0f;
+    s_alt_cfg.rate_lpf_alpha       = 0.30f;
+    s_alt_cfg.dist_jump_m          = 0.5f;
+    s_alt_cfg.invalid_reanchor_cnt = 50U;
+    s_alt_cfg.ground_dist_m        = 0.02f; /* 实测地面恒读 20mm（ToF 量程下限） */
+    /* 目标下限 = 地面：解锁后 t 停在地面值（摇杆不动），向上推才升高，
+     * 向下推到底降到 0.02 = 落地（与地面死区一致） */
+    s_alt_cfg.target_min_m         = 0.02f;
+    s_alt_cfg.target_max_m         = 4.0f;
+}
+
+/* =========================================================================
  * PID 对象
  * ========================================================================= */
 PID_TypeDef pid_pitch;
@@ -52,8 +96,22 @@ PID_TypeDef pid_roll;
 PID_TypeDef pid_rate_pitch;
 PID_TypeDef pid_rate_roll;
 
-/* 高度 alt 对象*/
+/* 定高环：外环（高度差→速率目标） */
 PID_TypeDef pid_alt;
+
+/* 定高环：内环（速率差→油门修正） */
+PID_TypeDef pid_alt_rate;
+
+/* 目标高度(m)：由 R_H 摇杆积分，回中冻结 */
+float Alt_Target_M = 0.0f;
+
+/* 实测爬升速率(m/s)：距离差分+低通 */
+float Alt_Rate_Mps = 0.0f;
+
+/* 定高环油门偏差输出（DShot 单位）：= 内环 P+I 输出，限幅 ±s_alt_cfg.out_max。
+ * Key==1 时叠加在油门摇杆 speed_temp 上；Key==3 时叠加在预设基准 ALT_DEV_OUT_MAX 上；
+ * Key!=1/3（锁定/停机）时恒 0。 */
+float Alt_Throttle_Out = 0.0f;
 
 /* 偏航角速度环对象 */
 PID_TypeDef pid_rate_yaw;
@@ -66,6 +124,13 @@ static PID_Cascade_t cascade_roll;
 static LPF1_t gyro_pitch_lpf;
 static LPF1_t gyro_roll_lpf;
 static LPF1_t gyro_yaw_lpf;
+
+/* ── 定高环内部状态 ─────────────────────────────────────────────── */
+static LPF1_t    alt_rate_lpf;            /* 爬升速率低通 */
+static uint8_t   s_alt_anchored = 0U;     /* 目标是否已锚定（解锁/回切/恢复后首帧有效距离） */
+static uint16_t  s_alt_invalid_cnt = 0U;  /* 连续无新帧/无效帧计数（超阈值重锚定） */
+static float     s_alt_last_dist_m = 0.0f; /* 上一帧距离(m)，微分用 */
+static uint32_t  s_alt_last_time_ms = 0U;  /* 上一帧传感器时间戳(ms)：微分 dt + 新鲜度判断用 */
 
 /* =========================================================================
  * 内部辅助
@@ -214,6 +279,25 @@ void PID_Contorl_Init(void)
 	LPF1_Init(&gyro_pitch_lpf, 0.45f, 0.0f);
 	LPF1_Init(&gyro_roll_lpf,  0.45f, 0.0f);
 	LPF1_Init(&gyro_yaw_lpf,   YAW_GYRO_LPF_ALPHA, 0.0f); /* 偏航轴加强滤波，抗振动毛刺 */
+
+	/* ---- 定高环 PID（100Hz，MTF02P ToF 距离；kp/ki 与别的环一样在 main.c Set_PID 调参） ---- */
+	Alt_Config_Init();
+
+	/* 外环：高度差 → 速率目标。纯 P，ki=0 故 Integral_max 传 0 */
+	PID_Init(&pid_alt);
+	PID_Init_WithLimit(&pid_alt, 0.0f, s_alt_cfg.rate_target_max);
+	PID_SetDeadband(&pid_alt, s_alt_cfg.pos_deadband_m);
+
+	/* 内环：速率差 → 油门偏差输出（P+I），Out_max=±out_max；
+	 * error_sum 上限 = i_max：Key==1 无预设基准时 I 需能学满悬停油门
+	 * （默认 ki=100 × i_max=8 = ±800 = out_max） */
+	PID_Init(&pid_alt_rate);
+	PID_Init_WithLimit(&pid_alt_rate, s_alt_cfg.i_max, s_alt_cfg.out_max);
+	PID_SetDeadband(&pid_alt_rate, s_alt_cfg.rate_deadband_mps);
+	PID_SetIntegralSeparation(&pid_alt_rate, s_alt_cfg.rate_sep_mps);
+
+	/* ---- 爬升速率估计低通（距离差分 → 低通） ---- */
+	LPF1_Init(&alt_rate_lpf, s_alt_cfg.rate_lpf_alpha, 0.0f);
 }
 
 /* =========================================================================
@@ -231,6 +315,18 @@ void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps
 	LPF1_Init(&gyro_pitch_lpf, 0.45f, current_gyro_pitch_dps);
 	LPF1_Init(&gyro_roll_lpf,  0.45f, current_gyro_roll_dps);
 	LPF1_Init(&gyro_yaw_lpf,   YAW_GYRO_LPF_ALPHA, GyroRawToDps(gyroz, gyro_bias_z));
+
+	/* ---- 定高环重置：目标待锚定（解锁后首帧有效距离即目标），输出归零 ---- */
+	PID_Reset(&pid_alt);
+	PID_Reset(&pid_alt_rate);
+	LPF1_Init(&alt_rate_lpf, s_alt_cfg.rate_lpf_alpha, 0.0f);
+	Alt_Target_M     = 0.0f;
+	Alt_Rate_Mps     = 0.0f;
+	Alt_Throttle_Out = 0.0f;
+	s_alt_anchored     = 0U;
+	s_alt_invalid_cnt  = 0U;
+	s_alt_last_dist_m  = 0.0f;
+	s_alt_last_time_ms = 0U;
 }
 
 /* =========================================================================
@@ -248,8 +344,9 @@ void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll)
 {
 	static uint8_t last_key = 0U;
 
-	/* 解锁边沿检测：Key 0->1 时重置 PID状态 */
-	if (Key == 1 && last_key != 1)
+	/* 解锁边沿检测：Key 0/2 -> 1/3 时重置 PID 状态
+	 * （空中 3 <-> 1 切换不重置，不扰姿态） */
+	if (((Key == 1U) || (Key == 3U)) && ((last_key == 0U) || (last_key == 2U)))
 	{
 		Control_Arm_Reset(GyroRawToDps(gyroy, gyro_bias_y),
 		                  GyroRawToDps(gyrox, gyro_bias_x));
@@ -318,4 +415,148 @@ void PID_Yaw_Rate_Control(float gyro_z_dps)
 		pid_rate_yaw.output    = 0.0f;
 		pid_rate_yaw.error_sum *= YAW_INTEGRAL_DECAY;
 	}
+}
+
+/* =========================================================================
+ * Alt_Control — 定高环（100Hz）
+ *
+ * 由 ControlTask 在解锁分支（Key==1/3）以 500Hz 调用，内部分频至 100Hz。
+ *
+ * 状态分工（Key 由遥控器 RxPacket[0] 下发，无独立飞行模式）：
+ *   - Key==1（解锁）：本环生效，混控 base = speed_temp + Alt_Throttle_Out
+ *     （油门摇杆打底，PID 出偏差修正）
+ *   - Key==3（解锁+预设）：混控 base = ALT_DEV_OUT_MAX + Alt_Throttle_Out
+ *     （预设基准油门出大力，PID 只出偏差修正）
+ *   - Key==2（锁定）：本环不被调用，Motor_Test 缓降并清零输出
+ *   R_H 推杆 → 速率积分进目标高度，回中冻结目标 = 保持当前高度。
+ *
+ * 数据一致性：distance/time_ms 为 uint32 单字、MTF02P_IsRangeValid() 读单字节，
+ * 均原子可安全直读；跨帧混读最多差一帧，由跳变毛刺保护兜底。
+ *
+ * 失效策略：
+ *   - 无新帧（传感器时间戳不变）/数据无效/毛刺：冻结输出（保持最后一拍油门，空中不掉油门）
+ *   - 连续无新帧或无效超阈值：置未锚定，恢复后以当前高度重新锚定（无冲击恢复）
+ *   - 锚定时内环积分清零（PID_Reset），从当前 base 起重新学真实悬停差额
+ * ========================================================================= */
+void Alt_Control(void)
+{
+	static uint8_t div = 0U;
+
+	float    dist_m;
+	float    diff_m;
+	float    rc_rate;
+	float    rate_target;
+	float    dt_s;
+	uint8_t  range_valid;
+	uint32_t dist_mm;
+	uint32_t dt_ms;
+	uint32_t sensor_time_ms;
+	int8_t   rh;
+
+	/* ── 非解锁状态（Key==2 等）：定高环休眠，输出恒 0 ── */
+	if ((Key != 1U) && (Key != 3U))
+	{
+		Alt_Throttle_Out = 0.0f;
+		s_alt_anchored   = 0U;
+		return;
+	}
+
+	div++;
+	if (div < s_alt_cfg.loop_div)
+	{
+		return;   /* 100Hz 降采样 */
+	}
+	div = 0U;
+
+	sensor_time_ms = mtf02p_data.time_ms;
+	dist_mm        = mtf02p_data.distance;
+	range_valid    = MTF02P_IsRangeValid();
+
+	/* ── 新鲜度/有效性：无新帧（时间戳没变，传感器冻结）或数据无效 →
+	 *    冻结输出（保持最后一拍油门）；连续超阈值 → 置未锚定，恢复时重新锚定 ── */
+	if ((range_valid == 0U) || (dist_mm == 0U) || (sensor_time_ms == s_alt_last_time_ms))
+	{
+		s_alt_invalid_cnt++;
+		if (s_alt_invalid_cnt > s_alt_cfg.invalid_reanchor_cnt)
+		{
+			s_alt_invalid_cnt = (uint16_t)(s_alt_cfg.invalid_reanchor_cnt + 1U); /* 封顶防回绕 */
+			s_alt_anchored = 0U;
+		}
+		return;
+	}
+	s_alt_invalid_cnt = 0U;
+
+	dist_m = (float)dist_mm / 1000.0f;
+
+	/* ── 锚定：首帧有效数据 → 只做状态初始化（PID/低通清零 + 微分参考值播种）。
+	 *    目标高度 t 不锚定距离 —— t 完全由 R_H 摇杆积分控制，
+	 *    静止/拿动时 t 不会跟随距离跳变。 */
+	if (s_alt_anchored == 0U)
+	{
+		PID_Reset(&pid_alt);
+		PID_Reset(&pid_alt_rate);
+		LPF1_Init(&alt_rate_lpf, s_alt_cfg.rate_lpf_alpha, 0.0f);
+		s_alt_last_dist_m  = dist_m;
+		s_alt_last_time_ms = sensor_time_ms;
+		Alt_Rate_Mps       = 0.0f;
+		s_alt_anchored     = 1U;
+		return;
+	}
+
+	/* ── 爬升速率估计：距离差分 + 低通 ──
+	 * dt 用传感器帧时间戳（无符号减法天然处理回绕），异常时回退固定步长；
+	 * 距离未变时按 diff=0 送入低通（速率自然衰减到 0，不冻结在陈旧值）。
+	 * 参考值每拍无条件更新：陈旧基线被消除（修复静止后首帧假速率尖峰），
+	 * 且真实高度剧变不会被毛刺保护永久丢弃。 */
+	dt_ms = sensor_time_ms - s_alt_last_time_ms;
+	dt_s  = ((dt_ms != 0U) && (dt_ms <= 500U))
+	        ? ((float)dt_ms / 1000.0f) : s_alt_cfg.loop_dt_s;
+	diff_m = dist_m - s_alt_last_dist_m;
+	s_alt_last_dist_m  = dist_m;
+	s_alt_last_time_ms = sensor_time_ms;
+
+	/* ── 毛刺保护：单帧跳变超阈值视为假数据，本拍不参与控制（输出保持）；
+	 *    参考值已更新，下一帧即可恢复跟踪 ── */
+	if ((diff_m > s_alt_cfg.dist_jump_m) || (diff_m < -s_alt_cfg.dist_jump_m))
+	{
+		return;
+	}
+
+	Alt_Rate_Mps = LPF1_Update(&alt_rate_lpf, diff_m / dt_s);
+
+	/* ── R_H 摇杆 → 速率指令（回中死区） ── */
+	rc_rate = 0.0f;
+	rh      = R_H;
+	if ((rh > s_alt_cfg.rc_deadband) || (rh < -s_alt_cfg.rc_deadband))
+	{
+		rc_rate = (float)rh * (s_alt_cfg.rc_max_rate / 100.0f);
+	}
+
+	/* ── 目标高度积分：t 完全由摇杆控制（回中冻结 = 保持当前高度），
+	 *    与实测距离无关 —— 不锚定、不跟随距离，静止时 t 不会随 d 跳变 ── */
+	Alt_Target_M += rc_rate * s_alt_cfg.loop_dt_s;
+	if (Alt_Target_M < s_alt_cfg.target_min_m) { Alt_Target_M = s_alt_cfg.target_min_m; }
+	if (Alt_Target_M > s_alt_cfg.target_max_m) { Alt_Target_M = s_alt_cfg.target_max_m; }
+
+	/* ── 地面死区：dist ≤ ground_dist_m（ToF 量程下限，实测地面恒读 20mm）= 飞控在地面 ──
+	 * 高度误差不参与（防落地后继续转桨/地面自爬升），内环清零输出归零；
+	 * 摇杆前馈保留 → 推 R_H 直接经速率内环 P 出油门起飞，回中电机静止在 base。 */
+	if (dist_m <= s_alt_cfg.ground_dist_m)
+	{
+		PID_Reset(&pid_alt_rate);
+		Alt_Throttle_Out = 0.0f;
+		rate_target      = rc_rate;
+	}
+	else
+	{
+		/* ── 外环：高度差 → 爬升速率目标（+ 摇杆前馈，爬升响应更快） ── */
+		PID_SetTarget(&pid_alt, Alt_Target_M);
+		rate_target = PID_CalcDt(&pid_alt, dist_m, s_alt_cfg.loop_dt_s) + rc_rate;
+	}
+	rate_target = Limit_Output(rate_target, s_alt_cfg.rate_target_max);
+
+	/* ── 内环：速率差 → 油门偏差输出（P 瞬态出力，I 学悬停差额；
+	 *    输出限幅 ±out_max、error_sum 上限 i_max 均由 PID 库保证） ── */
+	PID_SetTarget(&pid_alt_rate, rate_target);
+	Alt_Throttle_Out = PID_CalcDt(&pid_alt_rate, Alt_Rate_Mps, s_alt_cfg.loop_dt_s);
 }

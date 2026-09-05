@@ -2942,6 +2942,13 @@ uint8_t mpu_dmp_init(void)
     /* mpu_init 失败时必须返回错误，避免上层误判 DMP 初始化成功 */
     return 10;
 }
+
+/* 设备软复位后 DMP 内存已清空，同步清零库内加载标志，
+ * 供上层重试 mpu_dmp_init（否则重试会卡在 dmp_loaded 守卫上）。 */
+void mpu_dmp_loaded_clear(void)
+{
+    st.chip_cfg.dmp_loaded = 0;
+}
 //得到dmp处理后的数据(注意,本函数需要比较多堆栈,局部变量有点多)
 //pitch:俯仰角 精度:0.1°   范围:-90.0° <---> +90.0°
 //roll:横滚角  精度:0.1°   范围:-180.0°<---> +180.0°

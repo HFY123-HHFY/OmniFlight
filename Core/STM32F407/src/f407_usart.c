@@ -178,10 +178,12 @@ void F407_USART_Init(uint8_t usartId, uint32_t baudRate)
 	F407_USART_EnableNvicIrq(map.irqNum, IRQ_PRIO_USART);
 }
 
-/* F407 串口发送 1 字节：等待 TXE 后写 DR，再等待 TC 以保证实际发完。 */
+/* F407 串口发送 1 字节：等待 TXE 后写 DR，再等待 TC 以保证实际发完。
+ * 有界轮询：外设异常时放弃该字节返回，绝不永卡（钩子/栈溢出诊断也依赖本函数）。 */
 void F407_USART_WriteByte(uint8_t usartId, uint8_t data)
 {
 	F407_USART_Map_t map;
+	uint32_t poll;
 
 	map = F407_USART_GetMap(usartId);
 	if (map.regs == 0)
@@ -189,14 +191,20 @@ void F407_USART_WriteByte(uint8_t usartId, uint8_t data)
 		return;
 	}
 
-	while ((map.regs->SR & F407_USART_SR_TXE) == 0U)
+	poll = 0U;
+	while (((map.regs->SR & F407_USART_SR_TXE) == 0U) && (poll < 2000000UL))
 	{
-		/* 等待发送数据寄存器空。 */
+		poll++;
+	}
+	if ((map.regs->SR & F407_USART_SR_TXE) == 0U)
+	{
+		return;   /* 发送数据寄存器一直不空：外设异常，放弃该字节 */
 	}
 
 	map.regs->DR = data;
-	while ((map.regs->SR & F407_USART_SR_TC) == 0U)
+	poll = 0U;
+	while (((map.regs->SR & F407_USART_SR_TC) == 0U) && (poll < 2000000UL))
 	{
-		/* 等待发送完成，便于串口助手稳定接收。 */
+		poll++;
 	}
 }

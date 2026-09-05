@@ -85,7 +85,25 @@ int main(void)
 	/*BSP硬件抽象层初始化*/
 	LED_Init(LED_LOW);	/* LED 初始化-低电平 */
 	MPU_Init();	/* 初始化MPU6050 */
+	/*
+	 * DMP 初始化重试：传感器偶发卡死（重新烧录/复位都无效、必须断电的）时，
+	 * 软复位传感器 + 清零 dmp_loaded 标志后重试，一般 1~2 次即可恢复。
+	 * I2C 层另有 SDA 拉死总线恢复（f407_hw_i2c.c），此处兜底的是传感器逻辑卡死。
+	 */
 	uint8_t mpu6050_dma_int = mpu_dmp_init(); /* 初始化MPU6050 DMP */
+	if (mpu6050_dma_int != 0U)
+	{
+		uint8_t dmp_retry;
+		for (dmp_retry = 0U; (dmp_retry < 3U) && (mpu6050_dma_int != 0U); dmp_retry++)
+		{
+			MPU_Write_Byte(MPU_PWR_MGMT1_REG, 0x80U);   /* 软复位传感器（清 DMP 内存） */
+			Delay_ms(100U);
+			MPU_Write_Byte(MPU_PWR_MGMT1_REG, 0x00U);
+			Delay_ms(20U);
+			mpu_dmp_loaded_clear();                      /* 同步清零库内加载标志 */
+			mpu6050_dma_int = mpu_dmp_init();
+		}
+	}
 	usart_printf(USART1, "mpu6050_dma_int= %d\r\n", mpu6050_dma_int);
 	Enroll_MPU6050_Register();				/* MPU6050 INT 资源注册（DMP 初始化后才能使能 EXTI） */
 
@@ -109,14 +127,23 @@ int main(void)
 	/* 所有外设初始化完成-蜂鸣器初始化 */
 	Buzzer_Init();
 
+	/* 串级PID pitch轴 */
 	Set_PID(&pid_pitch,      4.0f, 0.0f, 0.20f);
 	Set_PID(&pid_rate_pitch, 1.0f, 0.015f, 0.0f);
 
+	/* 串级PID roll轴 */
 	Set_PID(&pid_roll,       4.0f, 0.0f, 0.20f);
 	Set_PID(&pid_rate_roll,  1.0f, 0.015f, 0.0f);
 
-	/* 偏航环初始参数：偏航力矩弱于俯仰/滚转，P 给大；台架验证方向后逐步调 */
+	/* 偏航环 */
 	Set_PID(&pid_rate_yaw,   2.0f, 0.05f, 0.0f);
+
+	/* 定高环（Key==1 解锁 / Key==3 解锁+预设基准 ALT_DEV_OUT_MAX）：
+	 * 外环纯 P（高度差→速率目标）；内环 P+I（速率差→油门偏差输出）。
+	 * 其余参数（节拍/死区/限幅/抗扰）见 Control.h 的 Alt_Cfg_t 结构体（默认值 Alt_Config_Init）。
+	 * 注：实测 400/100 拉满 R_H 飞不起来，已放大；仍不够就继续加 kp */
+	Set_PID(&pid_alt,        1.0f, 0.0f, 0.0f);
+	Set_PID(&pid_alt_rate, 600.0f, 150.0f, 0.0f);
 
 	/* ═══════════════════════════════════════════════════════════════
 	 * 启动 FreeRTOS 调度器 — 此后由 RTOS 接管 5 个任务，永不返回。

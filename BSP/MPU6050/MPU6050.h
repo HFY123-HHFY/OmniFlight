@@ -109,6 +109,8 @@ uint8_t MPU_Get_Accelerometer(int16_t *ax, int16_t *ay, int16_t *az);
 /* eMPL DMP 接口 */
 uint8_t mpu_dmp_init(void);
 uint8_t mpu_dmp_get_data(float *pitch, float *roll, float *yaw);
+/* 设备软复位后清零库内 dmp_loaded 标志，供上层重试 mpu_dmp_init */
+void mpu_dmp_loaded_clear(void);
 
 #ifdef __cplusplus
 }

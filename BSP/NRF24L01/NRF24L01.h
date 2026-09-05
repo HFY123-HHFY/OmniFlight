@@ -67,6 +67,12 @@ void NRF24L01_UpdateRxAddress(void);
 /* 最小回环读写测试：校验寄存器读写链路是否正常。 */
 void App_NRF24L01_TestOnce(void);
 
+/*
+ * 遥控数据包约定（32 字节，前 3 字节为控制指令）：
+ *   RxPacket[0] = Key ：1=解锁（手动油门） 2=锁定停机 3=定高（固定基准 400 + R_H 控高度）
+ *   RxPacket[1] = 油门 0~250 → speed_temp（非回中摇杆，仅 Key==1 手动状态使用）
+ *   RxPacket[2] = R_H 回中摇杆（-100~100），Key==3 定高时控高度
+ */
 extern volatile int8_t R_H; // 右边摇杆纵向偏移量（-100~100）
 
 /* 和遥控器交换数据 */

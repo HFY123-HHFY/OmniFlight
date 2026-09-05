@@ -44,6 +44,7 @@
 #define INCLUDE_vTaskDelay              1   /* vTaskDelay / xTaskDelayUntil */
 #define INCLUDE_xTaskDelayUntil         1   /* FreeRTOS V11 新函数名 */
 #define INCLUDE_vTaskSuspend            1   /* vTaskSuspend（调试用） */
+#define INCLUDE_uxTaskGetStackHighWaterMark 1 /* 栈水位监控（1s 打印一次，查卡死隐患） */
 
 /* ===================== 中断优先级（Cortex-M4：4bit，0 最高 15 最低）=====================
  * configMAX_SYSCALL_INTERRUPT_PRIORITY = 5：

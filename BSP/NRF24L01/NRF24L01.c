@@ -4,6 +4,7 @@
 #include "My_Usart/My_Usart.h"
 #include "gpio.h"
 #include "Motor.h"
+#include "MTF02P.h"
 
 /*
  * NRF24L01 模块私有状态：
@@ -459,7 +460,8 @@ void NRF24L01_RX_Data(void)
 	//收到任意遥控数据包都回传遥测
 	s_telemetryRequest = 1;
 
-	//得到遥控器的键值
+	//得到遥控器的键值：1=解锁（R_H 控高度，PID 全责） 2=锁定停机
+	//                  3=解锁+预设基准油门（ALT_DEV_OUT_MAX，PID 只出偏差）
 	Key = NRF24L01_RxPacket[0];
 
 	/* 遥控器0~250映射到DShot油门48~PWM_DUTY_MAX(2047) */
@@ -468,12 +470,8 @@ void NRF24L01_RX_Data(void)
 
 	R_H  = (int8_t)NRF24L01_RxPacket[2];
 
-	speed_temp = rx_duty; //把油门给到PWM占空比
-
-	if (Key == 1) //解锁基础油门
-	{
-		speed_temp = rx_duty; //把油门给到PWM占空比
-	}
+	//油门摇杆：Key==1 解锁时直接参与混控（base = speed_temp + 定高环偏差）
+	speed_temp = rx_duty;
 }
 
 //发送数据包：收到新遥控包后组包回传遥测
@@ -490,6 +488,7 @@ void NRF24L01_TX_Data(void)
 	*(float *)&NRF24L01_TxPacket[4] = Roll;  // 占用4，5，6，7
 	*(float *)&NRF24L01_TxPacket[8] = pid_rate_pitch.output; // 占用8，9，10，11
 	*(float *)&NRF24L01_TxPacket[12] = pid_rate_roll.output; // 占用12，13，14，15
+	*(uint32_t *)&NRF24L01_TxPacket[16] = mtf02p_data.distance; // 占用16，17，18，19
 
 	SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
 }

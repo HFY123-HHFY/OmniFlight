@@ -29,12 +29,15 @@ void F407_DMA_StreamInit(uint32_t streamBase, uint8_t channel,
         return;
     }
 
-    /* 若已使能，先关闭 */
+    /* 若已使能，先关闭（有界等待硬件确认，防流异常永卡） */
     if ((stream->CR & F407_DMA_CR_EN) != 0U)
     {
+        uint32_t poll = 0U;
+
         stream->CR &= ~F407_DMA_CR_EN;
-        while ((stream->CR & F407_DMA_CR_EN) != 0U)
+        while (((stream->CR & F407_DMA_CR_EN) != 0U) && (poll < 10000UL))
         {
+            poll++;
         }
     }
 
@@ -98,9 +101,12 @@ void F407_DMA_StreamDisable(uint32_t streamBase)
 
     if ((stream->CR & F407_DMA_CR_EN) != 0U)
     {
+        uint32_t poll = 0U;
+
         stream->CR &= ~F407_DMA_CR_EN;
-        while ((stream->CR & F407_DMA_CR_EN) != 0U)
+        while (((stream->CR & F407_DMA_CR_EN) != 0U) && (poll < 10000UL))
         {
+            poll++;
         }
     }
 }
@@ -140,21 +146,19 @@ void F407_DMA_ClearStreamFlags(uint8_t streamNum)
 
 /*
  * 轮询等待指定 Stream 传输完成（TCIF 置位）。
+ *
+ * 有界轮询：正常一帧 ~67µs 内完成，上限给足余量；
+ * 超时（TIM 停发/流异常）直接返回，由上层下一帧重新配置恢复，
+ * 绝不在最高优先级任务里永卡（曾导致全系统饿死）。
  */
 void F407_DMA_WaitForComplete(uint8_t streamNum)
 {
     uint32_t tcif = F407_DMA_GetTCIF(streamNum);
+    volatile uint32_t *isr = (streamNum <= 3U) ? &F407_DMA2->LISR : &F407_DMA2->HISR;
+    uint32_t poll = 0U;
 
-    if (streamNum <= 3U)
+    while (((*isr & tcif) == 0U) && (poll < 200000UL))
     {
-        while ((F407_DMA2->LISR & tcif) == 0U)
-        {
-        }
-    }
-    else
-    {
-        while ((F407_DMA2->HISR & tcif) == 0U)
-        {
-        }
+        poll++;
     }
 }

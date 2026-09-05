@@ -130,5 +130,7 @@ unsigned short inv_orientation_matrix_to_scalar(const signed char *mtx);
 uint8_t run_self_test(void);
 uint8_t mpu_dmp_init(void);
 uint8_t mpu_dmp_get_data(float *pitch,float *roll,float *yaw);
+/* 设备软复位后 DMP 内存已清空：清零库内 dmp_loaded 标志，供上层重试 mpu_dmp_init */
+void mpu_dmp_loaded_clear(void);
 
 #endif  /* #ifndef _INV_MPU_H_ */

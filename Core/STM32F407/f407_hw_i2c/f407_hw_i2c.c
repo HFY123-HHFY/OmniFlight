@@ -153,6 +153,45 @@ static void hw_select(void *sp, uint32_t sP, void *dp, uint32_t dP)
 	sdaPin  = dP;
 }
 
+/*
+ * 从机把 SDA 拉死时的总线恢复：
+ * 通信被复位/干扰打断后，MPU6050 可能卡在半个字节的发送中一直拉着 SDA，
+ * 之后连软复位命令都写不进去（表现：重新烧录/复位都没用，必须断电才恢复）。
+ * 做法：把 SCL/SDA 切到 GPIO 开漏，手动打 10 个 SCL 让从机完成挂起字节并释放总线，
+ * 再软复位 I2C 外设并恢复复用功能。
+ */
+static void i2c_bus_recovery(void)
+{
+	uint32_t i;
+	uint32_t idx_scl = pin_idx(sclPin);
+	uint32_t idx_sda = pin_idx(sdaPin);
+
+	/* 切 GPIO 开漏输出，SCL/SDA 先拉高 */
+	sclGpio->MODER   = (sclGpio->MODER & ~(0x3UL << (idx_scl * 2U))) | (0x1UL << (idx_scl * 2U));
+	sdaGpio->MODER   = (sdaGpio->MODER & ~(0x3UL << (idx_sda * 2U))) | (0x1UL << (idx_sda * 2U));
+	sclGpio->OTYPER |= (1UL << idx_scl);
+	sdaGpio->OTYPER |= (1UL << idx_sda);
+	sclGpio->BSRR = (1UL << idx_scl);
+	sdaGpio->BSRR = (1UL << idx_sda);
+	Delay_us(2U);
+
+	/* 打 10 个 SCL 脉冲，让从机完成挂起字节并释放 SDA */
+	for (i = 0U; i < 10U; i++)
+	{
+		sclGpio->BSRR = (1UL << (idx_scl + 16U)); /* SCL 低 */
+		Delay_us(2U);
+		sclGpio->BSRR = (1UL << idx_scl);         /* SCL 高 */
+		Delay_us(2U);
+	}
+
+	/* 软复位 I2C 外设并恢复复用功能（SWRST 会清 CR2，需重写 FREQ） */
+	soft_reset();
+	config_af(sclGpio, sclPin);
+	config_af(sdaGpio, sdaPin);
+	I2C->CR2 = 42U;
+	I2C->CR1 = CR1_PE;
+}
+
 /* ── Start ── */
 static void hw_start(void)
 {
@@ -179,6 +218,16 @@ static void hw_start(void)
 
 	to = 5000U;
 	while (!(I2C->SR1 & SR1_SB) && --to) {}
+
+	/* SB 超时：从机可能把 SDA 拉死（通信被复位打断），
+	 * 手动打 SCL 恢复总线后重试一次 START */
+	if (to == 0U)
+	{
+		i2c_bus_recovery();
+		I2C->CR1 |= CR1_START;
+		to = 5000U;
+		while (!(I2C->SR1 & SR1_SB) && --to) {}
+	}
 
 	last_ack = 0U;
 }

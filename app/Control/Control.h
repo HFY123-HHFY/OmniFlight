@@ -37,8 +37,70 @@ extern PID_TypeDef pid_rate_pitch;
 extern PID_TypeDef pid_rate_roll;
 extern PID_TypeDef pid_rate_yaw;
 
-/* 高度环 */
+/* ── 定高环（MTF02P ToF 距离，100Hz，Key==1 解锁 / Key==3 解锁+预设基准时生效） ── */
+
+/* 定高环唯一宏：预设基准油门(DShot 单位)，约悬停油门（实测 400 偏小飞不起来，已调大）。
+ * Key==3 = Key==1（解锁，R_H 控高度）+ 把本基准喂进混控 base，PID 只出偏差修正（不累）；
+ * Key==1 有油门摇杆 speed_temp 打底（base = speed_temp + 偏差输出），不经本基准。
+ * 改这一个宏 = 改给高度环的基准油门。 */
+#define ALT_DEV_OUT_MAX (600.0f)
+
+/* ── 定高环配置结构体 ──
+ * PID 增益（kp/ki）不在这里：与 Pitch/Roll/偏航环一致，在 main.c 用 Set_PID 调参；
+ * 这里收定高环专属参数（节拍/死区/限幅/抗扰）。
+ * 默认值由 Control.c 的 Alt_Config_Init() 加载，需要时可在 main.c 覆盖个别字段。 */
+typedef struct
+{
+    /* ── 节拍 ── */
+    uint8_t  loop_div;             /* 500Hz 内分频 → 定高节拍（5 → 100Hz） */
+    float    loop_dt_s;            /* 定高环固定步长 10ms（PID dt） */
+
+    /* ── R_H 摇杆 ── */
+    float    rc_max_rate;          /* 满杆 ±100 → ±m/s 速率指令 */
+    int8_t   rc_deadband;          /* 回中死区 ±N，防摇杆回中偏移 */
+
+    /* ── 高度外环（纯 P：高度差 → 速率目标） ── */
+    float    pos_deadband_m;       /* 高度死区：悬停微差当 0，防抖动 */
+    float    rate_target_max;      /* 速率目标限幅 ±m/s（= 满杆速率 + 误差修正余量） */
+
+    /* ── 速率内环（P+I：速率差 → 油门偏差） ── */
+    float    i_max;                /* error_sum 上限：I_out ≤ ki×i_max（默认 ki=150×8=±1200=out_max，
+                                      I 需能学满悬停差额） */
+    float    out_max;              /* 油门偏差输出限幅 ±（DShot 单位） */
+    float    rate_deadband_mps;    /* 速率死区：微分噪声当 0，I 保持悬停修正 */
+    float    rate_sep_mps;         /* 速率误差超此值暂停积分，防大机动积分污染 */
+
+    /* ── 速率估计 ── */
+    float    rate_lpf_alpha;       /* 距离微分低通系数（ToF 单帧微分噪声大） */
+
+    /* ── 抗扰 ── */
+    float    dist_jump_m;          /* 单帧距离跳变阈值：超出视为毛刺（本拍不参与控制） */
+    uint16_t invalid_reanchor_cnt; /* 连续无新帧/无效帧计数阈值 → 置未锚定（100Hz 下 50=0.5s） */
+    float    ground_dist_m;        /* 地面死区：dist ≤ 此值视为在地面（ToF 量程下限，实测 20mm 恒读） */
+    float    target_min_m;         /* 目标高度下限 = 地面值：解锁 t 从地面起，向下推杆最低降到地面 */
+    float    target_max_m;         /* 目标高度上限（ToF 可靠量程内，可调） */
+} Alt_Cfg_t;
+
+/* 定高环运行配置实例（默认值由 PID_Contorl_Init 内的 Alt_Config_Init 加载） */
+extern Alt_Cfg_t s_alt_cfg;
+
+/* 外环：高度差(m) → 爬升速率目标(m/s)，纯 P */
 extern PID_TypeDef pid_alt;
+
+/* 内环：爬升速率差(m/s) → 油门偏差输出(DShot 单位)，P+I，
+ * Key==1 叠加在油门摇杆 speed_temp 上 / Key==3 叠加在预设基准 ALT_DEV_OUT_MAX 上 */
+extern PID_TypeDef pid_alt_rate;
+
+/* 目标高度(m)：由 R_H 摇杆指令积分而来，摇杆回中即冻结（保持当前高度） */
+extern float Alt_Target_M;
+
+/* 实测爬升速率(m/s)：距离差分+低通，调试遥测用 */
+extern float Alt_Rate_Mps;
+
+/* 定高环油门偏差输出(DShot 单位)：= 内环 P+I 输出，限幅 ±s_alt_cfg.out_max。
+ * Key==1：叠加在油门摇杆 speed_temp 上；Key==3：叠加在预设基准 ALT_DEV_OUT_MAX 上；
+ * Key==2（锁定/停机）时恒 0。 */
+extern float Alt_Throttle_Out;
 
 /*
  * 控制初始化：
@@ -80,6 +142,24 @@ void PID_Pitch_Roll_Combined(float actual_pitch, float actual_roll);
  * 输出写入 pid_rate_yaw.output，由混控层加载 yaw 项。
  */
 void PID_Yaw_Rate_Control(float gyro_z_dps);
+
+/*
+ * 定高环控制（100Hz，内部对 500Hz 调用做分频）。
+ *
+ * 仅在解锁状态生效：Key==1（解锁）/ Key==3（解锁+预设基准油门）：
+ *   R_H 摇杆 → 速率指令积分 → Alt_Target_M（回中冻结目标）
+ *   高度外环 pid_alt：高度差 → 爬升速率目标（+ 摇杆前馈）
+ *   速率内环 pid_alt_rate：速率差 → 油门偏差输出（P+I，±out_max 限幅）
+ *   Alt_Throttle_Out = 内环偏差 → 混控 base（Motor.c）：
+ *     Key==1 = speed_temp + Alt_Throttle_Out（油门摇杆打底，R_H 定高环出偏差）
+ *     Key==3 = ALT_DEV_OUT_MAX + Alt_Throttle_Out（预设基准，PID 只出偏差）
+ *
+ * Key==2（锁定）：本环不被调用，Motor_Test 缓降并清零输出。
+ * 参数：唯一宏 ALT_DEV_OUT_MAX（预设基准油门）+ Alt_Cfg_t 结构体（节拍/死区/限幅/抗扰）；
+ * PID 增益与 Pitch/Roll/偏航环一致，在 main.c 用 Set_PID 调参。
+ * 锚定时内环积分清零；数据失效/毛刺/无新帧时冻结输出（保持最后一拍油门）。
+ */
+void Alt_Control(void);
 
 #ifdef __cplusplus
 }

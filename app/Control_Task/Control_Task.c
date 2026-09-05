@@ -18,24 +18,56 @@
  * FreeRTOS 钩子函数（应用层，由内核回调）
  * ──────────────────────────────────────────────────────────────── */
 
+/* 死机诊断：轮询方式把消息打到 USART1（不依赖中断/内核，中断全关也能发）。 */
+static void Hang_PrintPolling(const char *msg)
+{
+	const char *p;
+
+	if (msg == 0)
+	{
+		return;
+	}
+	for (p = msg; *p != '\0'; p++)
+	{
+		API_USART_WriteByte(API_USART1, (uint8_t)*p);
+	}
+}
+
 /*
  * vApplicationStackOverflowHook — 栈溢出检测钩子（configCHECK_FOR_STACK_OVERFLOW=2）
- * 被调用时任务已严重损坏，唯一能做的：关闭所有中断 + 死循环，方便调试器检查。
+ * 被调用时任务已严重损坏：先在串口上打印是哪个任务溢出（轮询发送，不依赖内核），
+ * 再关闭所有中断 + 死循环，方便调试器检查。
  */
 void vApplicationStackOverflowHook( TaskHandle_t xTask, char * pcTaskName )
 {
 	(void)xTask;
-	(void)pcTaskName;
+
+	Hang_PrintPolling("\r\n[STACK OVERFLOW] ");
+	Hang_PrintPolling(pcTaskName);
+	Hang_PrintPolling("\r\n");
 	__asm volatile( "cpsid i" );
 	for ( ;; ) { }
 }
 
 /*
  * vApplicationMallocFailedHook — 堆分配失败钩子（configUSE_MALLOC_FAILED_HOOK=1）
- * heap_4 内存不足时调用，死循环便于调试定位。
+ * heap_4 内存不足时调用，打印提示后死循环便于调试定位。
  */
 void vApplicationMallocFailedHook( void )
 {
+	Hang_PrintPolling("\r\n[HEAP OUT OF MEMORY]\r\n");
+	__asm volatile( "cpsid i" );
+	for ( ;; ) { }
+}
+
+/*
+ * HardFault_Handler — 覆盖启动文件的 weak 定义。
+ * 硬件异常（野指针/未对齐/总线错误等）都会落到这里：
+ * 打印提示后死循环，用调试器看 CFSR/PC/LR 定位。
+ */
+void HardFault_Handler(void)
+{
+	Hang_PrintPolling("\r\n[HARDFAULT]\r\n");
 	__asm volatile( "cpsid i" );
 	for ( ;; ) { }
 }
@@ -50,6 +82,14 @@ static SemaphoreHandle_t xMpuSem;          /* EXTI → SensorTask (200Hz) */
 static SemaphoreHandle_t xAttitudeMutex;   /* 姿态数据互斥锁（SensorTask 写 / ControlTask 读） */
 static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交织） */
 
+/* 任务句柄（栈水位监控用） */
+static TaskHandle_t s_controlTaskHandle;
+static TaskHandle_t s_sensorTaskHandle;
+static TaskHandle_t s_mtf02pTaskHandle;
+static TaskHandle_t s_radioTaskHandle;
+static TaskHandle_t s_telemetryTaskHandle;
+static TaskHandle_t s_ledTaskHandle;
+
 /* ────────────────────────────────────────────────────────────────
  * 串口打印开关：起飞前设 0 关闭所有 printf
  * ──────────────────────────────────────────────────────────────── */
@@ -61,7 +101,8 @@ static SemaphoreHandle_t xPrintMutex;      /* printf 互斥锁（多任务防交
  * TIM2 每 2ms 给一次信号量 → 500Hz 控制节拍。
  * 业务逻辑（原 TIM1 ISR 内容）：
  *   1) 读姿态共享数据（互斥锁保护）；
- *   2) 已解锁 → Pitch/Roll 串级 PID + 偏航角速度环 + 三轴混控 + DShot 输出；
+ *   2) 已解锁（Key==1 手动 / Key==3 定高）→ Pitch/Roll 串级 PID + 偏航角速度环
+ *      + 定高环 + 三轴混控 + DShot 输出；
  *      未解锁 → Motor_Test（电机掉电保护状态机）。
  * ──────────────────────────────────────────────────────────────── */
 static void ControlTask(void *pvParameters)
@@ -80,11 +121,12 @@ static void ControlTask(void *pvParameters)
 		short gz    = gyroz;
 		xSemaphoreGive(xAttitudeMutex);
 
-		/* PID 控制-电机混控 */
-		if (Key == 1U)
+		/* PID 控制-电机混控（Key==1 手动 / Key==3 定高，均为解锁态） */
+		if ((Key == 1U) || (Key == 3U))
 		{
 			PID_Pitch_Roll_Combined(pitch, roll);                    /* Pitch/Roll 串级 PID */
 			PID_Yaw_Rate_Control((float)gz / GYRO_SENS_2000DPS);     /* 偏航角速度环（消除自旋） */
+			Alt_Control();                                           /* 定高环（仅 Key==3 生效，内部 100Hz 降采样） */
 			Motor_Test();                                            /* 三轴混控 → DShot_Write */
 		}
 		else
@@ -132,7 +174,7 @@ static void SensorTask(void *pvParameters)
  *
  * 非阻塞轮询，2ms 周期消费 ISR 入队的字节（MTF02P_RxPush 由 USART ISR 调用）。
  * Micolink 帧校验通过后自动刷新 mtf02p_data（距离 mm + 光流速度 cm/s@1m + 质量状态），
- * 供后续定高定点使用。
+ * 供定高环使用（光流定点为后续工作）。
  * ──────────────────────────────────────────────────────────────── */
 static void Mtf02pTask(void *pvParameters)
 {
@@ -183,15 +225,37 @@ static void TelemetryTask(void *pvParameters)
 #if (DEBUG_PRINT_ENABLE == 1U)
 		xSemaphoreTake(xPrintMutex, portMAX_DELAY);
 		// usart_printf(USART1, "Pitch=%.2f Roll=%.2f\r\n", Pitch, Roll); /* 姿态打印 */
-		usart_printf(USART1, "gz=%.1f dps yaw_out=%.1f\r\n",
-		             (double)((float)gyroz / GYRO_SENS_2000DPS),
-		             (double)pid_rate_yaw.output);                    /* 偏航环调试打印 */
+		// usart_printf(USART1, "gz=%.1f dps yaw_out=%.1f\r\n",
+		//              (double)((float)gyroz / GYRO_SENS_2000DPS),
+		//              (double)pid_rate_yaw.output);                    /* 偏航环调试打印 */
+		usart_printf(USART1, "d=%.2f t=%.2f v=%.2f out=%.0f RH=%d\r\n",
+		             (double)((float)mtf02p_data.distance / 1000.0f),
+		             (double)Alt_Target_M, (double)Alt_Rate_Mps,
+		             (double)Alt_Throttle_Out, R_H);           /* 定高环调试打印 */
 		// usart_printf(USART1, "dist=%lu mm flow=(%d,%d) q=%u st=%u/%u\r\n",
 		//              (unsigned long)mtf02p_data.distance,
 		//              mtf02p_data.flow_x, mtf02p_data.flow_y,
 		//              mtf02p_data.flow_quality,
 		//              mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
 		// usart_printf(USART1, "Key=%d speed_temp=%d R_H=%d\r\n", Key, speed_temp, R_H); /* NRF24L01测试打印 */
+
+		/* 每 1s 打印一次各任务栈剩余水位（字）：哪个任务逼近 0 就是卡死隐患 */
+		// {
+		// 	static uint8_t wmCount = 0U;
+
+		// 	wmCount++;
+		// 	if (wmCount >= 10U)
+		// 	{
+		// 		wmCount = 0U;
+		// 		usart_printf(USART1, "WM Ctl=%u Sen=%u Mtf=%u Rad=%u Tel=%u Led=%u\r\n",
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_controlTaskHandle),
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_sensorTaskHandle),
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_mtf02pTaskHandle),
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_radioTaskHandle),
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_telemetryTaskHandle),
+		// 		             (unsigned)uxTaskGetStackHighWaterMark(s_ledTaskHandle));
+		// 	}
+		// }
 		xSemaphoreGive(xPrintMutex);
 #endif
 	}
@@ -218,9 +282,9 @@ static void LEDTask(void *pvParameters)
 		{
 			mode = 0U; /* 断链：绿色闪烁 */
 		}
-		else if (Key == 1U)
+		else if ((Key == 1U) || (Key == 3U))
 		{
-			mode = 1U; /* 解锁：RGB 交替 */
+			mode = 1U; /* 解锁（1=手动 / 3=定高）：RGB 交替 */
 		}
 		else if (Key == 2U)
 		{
@@ -292,13 +356,15 @@ void Control_Task_RTOSInit(void)
 	xAttitudeMutex = xSemaphoreCreateMutex();
 	xPrintMutex    = xSemaphoreCreateMutex();
 
-	/* 创建任务（栈深度单位：字 = 4 字节） */
-	xTaskCreate(ControlTask,    "Control",  512, NULL, 6, NULL);
-	xTaskCreate(SensorTask,     "Sensor",   512, NULL, 5, NULL);
-	xTaskCreate(Mtf02pTask,     "Mtf02p",   256, NULL, 4, NULL);
-	xTaskCreate(RadioTask,      "Radio",    256, NULL, 3, NULL);
-	xTaskCreate(TelemetryTask,  "Telem",    256, NULL, 2, NULL);
-	xTaskCreate(LEDTask,        "LED",      256, NULL, 1, NULL);
+	/* 创建任务（栈深度单位：字 = 4 字节）。
+	 * 注意：溢出 = 全局死机（钩子关中断），打印类/协议类任务给足余量，
+	 * 并用 1s 一次的水位监控（WM 行）观察真实使用量再精调。 */
+	xTaskCreate(ControlTask,    "Control",  512, NULL, 6, &s_controlTaskHandle);
+	xTaskCreate(SensorTask,     "Sensor",   512, NULL, 5, &s_sensorTaskHandle);
+	xTaskCreate(Mtf02pTask,     "Mtf02p",   320, NULL, 4, &s_mtf02pTaskHandle);
+	xTaskCreate(RadioTask,      "Radio",    384, NULL, 3, &s_radioTaskHandle);
+	xTaskCreate(TelemetryTask,  "Telem",    384, NULL, 2, &s_telemetryTaskHandle);
+	xTaskCreate(LEDTask,        "LED",      256, NULL, 1, &s_ledTaskHandle);
 }
 
 /* ────────────────────────────────────────────────────────────────

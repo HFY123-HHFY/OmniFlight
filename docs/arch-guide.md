@@ -119,7 +119,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │ TIM2 ISR (2ms, 优先级5) → xControlSem ──► ControlTask(6)            │
-│   500Hz：读姿态快照 → 串级PID + 偏航角速度环 → 混控 → DShot          │
+│   500Hz：读姿态快照 → 串级PID + 偏航角速度环 + 定高环(100Hz) → 混控 → DShot│
 ├─────────────────────────────────────────────────────────────────────┤
 │ MPU6050 EXTI (200Hz, 优先级6) → xMpuSem ──► SensorTask(5)           │
 │   200Hz：I2C 读 DMP + 陀螺 + 加速度 → 互斥锁提交姿态全局变量          │
@@ -144,6 +144,7 @@ Pitch/Roll 串级；偏航轴为单角速度环（见 §5.3）
 - 外环：Pitch/Roll 角度 → 角速度目标（Out_max=±400°/s）
 - 内环：gyrox/gyroy 去偏+低通 → 电机输出（Out_max=2047）
 - 偏航：gyroz 去偏+低通 → 角速度 PID → 混控 yaw 项（Out_max=500，单环）
+- 定高：高度外环(纯P, 100Hz) → 爬升速率内环(PI) → 油门修正加在 base 上（见 §5.4）
 - 低通：Pitch/Roll alpha=0.45，Yaw alpha=0.20（截止约 20Hz@500Hz，三轴各一个实例）
 
 ### 5.3 偏航角速度环
@@ -168,12 +169,72 @@ gyroz (LSB) → 去零偏 → deg/s → 低通 → PID (kp=2.0, ki=0.05) → 混
 - 历史：曾用 QMC5883P 磁力计互补滤波融合 IMU_Yaw（app/IMU），因地磁干扰不可靠已删除；
   航向保持外环可后加（用 DMP 或陀螺积分短时航向，而非磁力计）
 
-### 5.4 高度/位置（后续工作）
+### 5.4 定高环（MTF02P ToF）
 
-历史版本曾用 aacz + BMP280 互补滤波融合高度（app/Altitude），实测低空不可信已删除。
-当前高度方案定为 MTF02P ToF 测距 `mtf02p_data.distance`（mm，低空有效），
-位置方案定为光流 `flow_x/flow_y`（cm/s@1m，实际速度 = 光流速度 × 高度(m)），
-定高定点环待后续开发。BMP280/QMC5883P 驱动保留（未初始化），供高空高度/航向复用。
+历史版本曾用 aacz + BMP280 互补滤波融合高度（app/Altitude），实测低空不可信已删除；
+高度方案改为 MTF02P ToF 测距。BMP280/QMC5883P 驱动保留（未初始化），供高空高度/航向复用。
+
+**控制目标**：由遥控 Key（RxPacket[0]）切换状态（无独立飞行模式字节）：
+- Key==1 解锁：定高环生效，混控 base = speed_temp + Alt_Throttle_Out
+  （油门摇杆直接打底给油，推多少给多少；R_H 定高环在摇杆基准上出偏差修正）
+- Key==2 锁定停机：混控层缓降油门
+- Key==3 解锁+预设基准：混控 base = ALT_DEV_OUT_MAX + Alt_Throttle_Out
+  —— 预设基准油门（约悬停）出大力，PID 只出偏差修正（不累），speed_temp 不参与
+- R_H 回中摇杆（-100~+100）控制高度（Key==1/3 均生效）—— 推杆按速率移动目标高度，
+  回中冻结目标 = 保持当前高度。100Hz 节拍（ControlTask 500Hz 内 5 分频，`Alt_Control()`）
+
+```
+R_H 摇杆 ─(死区±5, 满杆±1.0m/s)─> 积分进 Alt_Target_M (0.02~4.0m 限幅, 下限=地面)
+                                     │
+MTF02P distance(mm) ──────────┬──────┤
+                              │      ▼
+                          高度外环 pid_alt（纯P, kp=1.0）
+                         高度差→速率目标(+摇杆前馈), 限幅±1.5m/s
+                              │
+                              ▼
+                          速率内环 pid_alt_rate（P+I, kp=600, ki=150）
+  距离差分(时间戳dt)+低通(α=0.3) → 实测爬升速率 ──► 速率差 → 油门偏差输出(±out_max)
+                              │
+                              ▼
+      Alt_Throttle_Out → 混控 base = speed_temp + Alt_Throttle_Out (Key==1)
+                         或 ALT_DEV_OUT_MAX + Alt_Throttle_Out (Key==3)
+```
+
+- 混控 base 结构（Motor.c 混控层）：
+  - `ALT_DEV_OUT_MAX(600)`（Control.h 唯一定高环宏）：预设基准油门 ——
+    Key==3 解锁即给 600（实测 400 偏小飞不起来，已调大），改这一个宏即改基准
+  - `Alt_Throttle_Out`：定高环 P+I 偏差输出（±out_max，默认 2×ALT_DEV_OUT_MAX=1200：
+    I 学悬停差额够用），R_H 控高度时的修正量；Key==1 时叠加在 speed_temp 摇杆基准上
+  - 空中 Key 1↔3 切换会使 base 阶跃 ±ALT_DEV_OUT_MAX，勿空中切换
+- 参数管理：`Alt_Cfg_t` 结构体定义在 Control.h（实例 `s_alt_cfg`，默认值由
+  Control.c 的 `Alt_Config_Init()` 加载）——节拍/死区/限幅/抗扰参数集中一处；
+  PID 增益与 Pitch/Roll/偏航环一致，在 main.c 用 Set_PID 调参（定高内环实测 600/150）
+- 锚定：切入解锁 / 数据恢复后的首帧有效数据 → 只做 PID/低通清零 + 微分参考值播种，
+  目标高度 t 不锚定距离（t 完全由 R_H 摇杆积分控制）
+- 速率估计：`(dist_m - last) / (time_ms - last_time_ms)`（无符号减法处理时间戳回绕，
+  超长间隔回退固定 10ms 步长），LPF α=0.30 压制 ToF 微分噪声；
+  距离未变时按 diff=0 送入低通（速率自然衰减到 0）；参考值每拍无条件更新
+- 内环 I 的作用：稳态悬停差额由 I 承担；error_sum 上限 `cfg.i_max`
+  （默认 8，ki=100 时 I_out ≤ ±800 = out_max——Key==1 无预设基准时
+  I 需能学满悬停油门）；速率误差 >1m/s 时积分分离
+- 死区：高度 3cm、速率 0.1m/s（悬停微差当 0，防抖动；I 在死区内保持悬停修正值；
+  ToF mm 量化产生的 ±0.05m/s 微分噪声落在速率死区内，被整体抑制）
+- 抗扰设计：
+  - 无新帧（传感器时间戳不变，即传感器冻结但状态仍有效）或数据无效
+    （tof_status≠1 或 distance==0）：冻结输出（保持最后一拍油门，避免空中突然掉油门）；
+    连续超阈值（0.5s）后置未锚定，恢复时重新锚定
+  - 单帧距离跳变 >0.5m 视为毛刺，本拍不参与控制，但参考值照常更新
+    （下一帧即可恢复跟踪；真实高度剧变不会被永久丢弃）
+  - 切入解锁首帧有效数据只做状态初始化（PID/低通清零 + 微分参考播种），
+    目标高度 t 由摇杆积分从地面值开始
+- R_H 死区 ±5：回中弹簧偏移不会引起高度漂移
+- 起飞注意：
+  - Key==3：切入瞬间油门即跳至基准 ALT_DEV_OUT_MAX(600)（内环积分从 0 起），
+    在地面切入时电机直接转到约悬停油门
+  - Key==1：base = speed_temp + 定高环偏差 —— 推油门摇杆直接给油、
+    推 R_H 经内环 P 叠加爬升推力（实测 kp=600/ki=150 拉满能起飞；
+    仍不够 → 加大 kp/ALT_DEV_OUT_MAX）；若悬停后仍缓漂 → 加大 ki
+- 注意：数据失效期间冻结输出（保持最后一拍油门），应尽快降落或 Key==2 停机
 
 ### 5.5 传感器校准
 
@@ -208,7 +269,7 @@ ISR 只做「给信号量 / 硬件搬运」，业务逻辑全部在任务里：
 
 | 任务 | 优先级 | 频率 | 唤醒方式 | 职责 |
 |------|:---:|:---:|----------|------|
-| ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → 串级 PID（含偏航角速度环）→ 混控 |
+| ControlTask | 6 | 500Hz | xControlSem（TIM2 ISR） | 姿态快照 → 串级 PID（含偏航角速度环）+ 定高环(100Hz) → 混控 |
 | SensorTask | 5 | 200Hz | xMpuSem（EXTI ISR） | I2C 读 DMP/陀螺/加速度 → 提交全局姿态 |
 | Mtf02pTask | 4 | 2ms 轮询 | xTaskDelayUntil | MTF02P_Task Micolink 协议解析（距离+光流） |
 | RadioTask | 3 | 10ms | xTaskDelayUntil | NRF24L01_Data 遥控+遥测 |
@@ -330,9 +391,9 @@ FreeRTOS 分区：优先级 5~15「感知」（可调 FromISR API），0~4「不
 3. [A_Entry/main.c](A_Entry/main.c) — 飞控初始化 → RTOS 调度器启动
 4. [A_Entry/FreeRTOSConfig.h](A_Entry/FreeRTOSConfig.h) — 内核配置（中断优先级分区 / 堆 / API 开关）
 5. [Enroll/407_hw_config.h](Enroll/407_hw_config.h) — F407 板级映射
-6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID（含偏航角速度环）+ 陀螺三轴零偏校准
+6. [app/Control/Control.c](app/Control/Control.c) — 串级 PID（含偏航角速度环 + 定高环）+ 陀螺三轴零偏校准
 7. [app/Control_Task/Control_Task.c](app/Control_Task/Control_Task.c) — 5 任务 + 信号量/互斥锁 + ISR 回调
-8. [BSP/Motor/Motor.c](BSP/Motor/Motor.c) — 三轴混控（X 型矩阵 + yaw 对角项 + MOTOR_YAW_DIR）
+8. [BSP/Motor/Motor.c](BSP/Motor/Motor.c) — 三轴混控（X 型矩阵 + yaw 对角项 + MOTOR_YAW_DIR + base 叠加定高修正）
 9. [BSP/Dshot/Dshot.c](BSP/Dshot/Dshot.c) — DShot300 协议
 10. [SYSTEM/IrqPriority.h](SYSTEM/IrqPriority.h) — 中断优先级（FreeRTOS 分区）
 11. [Middlewares/FreeRTOS-Kernel/](Middlewares/FreeRTOS-Kernel/) — vendored 内核 V11.1.0
