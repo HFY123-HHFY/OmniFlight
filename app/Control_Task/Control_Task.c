@@ -102,7 +102,7 @@ static TaskHandle_t s_ledTaskHandle;
  * 业务逻辑（原 TIM1 ISR 内容）：
  *   1) 读姿态共享数据（互斥锁保护）；
  *   2) 已解锁（Key==1 手动 / Key==3 定高）→ Pitch/Roll 串级 PID + 偏航角速度环
- *      + 定高环 + 三轴混控 + DShot 输出；
+ *      + 定高环 + 定点环 + 三轴混控 + DShot 输出；
  *      未解锁 → Motor_Test（电机掉电保护状态机）。
  * ──────────────────────────────────────────────────────────────── */
 static void ControlTask(void *pvParameters)
@@ -124,9 +124,10 @@ static void ControlTask(void *pvParameters)
 		/* PID 控制-电机混控（Key==1 手动 / Key==3 定高，均为解锁态） */
 		if ((Key == 1U) || (Key == 3U))
 		{
+			Pos_Control();                                           /* 定点环（100Hz，写 Target_Pitch/Roll，须在串级 PID 前） */
 			PID_Pitch_Roll_Combined(pitch, roll);                    /* Pitch/Roll 串级 PID */
 			PID_Yaw_Rate_Control((float)gz / GYRO_SENS_2000DPS);     /* 偏航角速度环（消除自旋） */
-			Alt_Control();                                           /* 定高环（仅 Key==3 生效，内部 100Hz 降采样） */
+			Alt_Control();                                           /* 定高环（内部 100Hz 降采样） */
 			Motor_Test();                                            /* 三轴混控 → DShot_Write */
 		}
 		else
@@ -174,7 +175,7 @@ static void SensorTask(void *pvParameters)
  *
  * 非阻塞轮询，2ms 周期消费 ISR 入队的字节（MTF02P_RxPush 由 USART ISR 调用）。
  * Micolink 帧校验通过后自动刷新 mtf02p_data（距离 mm + 光流速度 cm/s@1m + 质量状态），
- * 供定高环使用（光流定点为后续工作）。
+ * 供定高环/定点环使用。
  * ──────────────────────────────────────────────────────────────── */
 static void Mtf02pTask(void *pvParameters)
 {
@@ -196,13 +197,12 @@ static void RadioTask(void *pvParameters)
 {
 	(void)pvParameters;
 
-	TickType_t xLastWakeTime = xTaskGetTickCount();
-
 	for (;;)
 	{
-		xTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(10));
 		NRF24L01_RX_Data(); // 接收 + 解析遥控指令
 		NRF24L01_TX_Data(); // 回传
+		/* 收发函数可能因无线重发耗时，操作后强制让出 CPU，避免周期追赶占满任务。 */
+		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
@@ -238,7 +238,16 @@ static void TelemetryTask(void *pvParameters)
 		//              mtf02p_data.flow_quality,
 		//              mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
 		// usart_printf(USART1, "Key=%d speed_temp=%d Altitude_Stick_Input=%d\r\n", Key, speed_temp, Altitude_Stick_Input); /* NRF24L01测试打印 */
-		usart_printf(USART1, "x=%d, y=%d, R_H=%d\r\n",  mtf02p_data.flow_x, mtf02p_data.flow_y, Position_XY_Stick_Input);
+		usart_printf(USART1, "A=%u q=%u h=%.1f s=(%d,%d) t=(%.1f,%.1f) e=(%.2f,%.2f) p=(%.1f,%.1f) i=(%.1f,%.1f) v=(%.2f,%.2f)\r\n",
+		             Pos_Active,
+		             mtf02p_data.flow_quality,
+		             (double)((float)mtf02p_data.distance / 1000.0f),
+		             Position_X_Stick_Input, Position_Y_Stick_Input,
+		             (double)Pos_TiltX_Deg, (double)Pos_TiltY_Deg,
+		             (double)pid_pos_x.error0, (double)pid_pos_y.error0,
+		             (double)pid_pos_x.P_out, (double)pid_pos_y.P_out,
+		             (double)pid_pos_x.I_out, (double)pid_pos_y.I_out,
+		             (double)Pos_Vx_Mps, (double)Pos_Vy_Mps); /* 定点环调试打印：A=生效 q=光流质量 h=高度 s=摇杆原始值 t=倾角输出(PID输出,p+i限幅后) e=速度误差 p=P项 i=I项 v=实测速度 */
 		/* 每 1s 打印一次各任务栈剩余水位（字）：哪个任务逼近 0 就是卡死隐患 */
 		// {
 		// 	static uint8_t wmCount = 0U;

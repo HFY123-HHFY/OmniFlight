@@ -37,6 +37,66 @@ extern PID_TypeDef pid_rate_pitch;
 extern PID_TypeDef pid_rate_roll;
 extern PID_TypeDef pid_rate_yaw;
 
+/* ── 定点环（MTF02P 光流，100Hz，Key==1 解锁 / Key==3 解锁+预设基准时生效） ──
+ * 光流速度(m/s) → 水平速度环 PI → 倾角指令(±out_max_deg) → Target_Pitch/Target_Roll，
+ * 复用 Pitch/Roll 串级外环。与定高环同构：速度环不用差分（光流本身是速度），
+ * 无"陈旧基线假尖峰"问题；毛刺/失效/低质量策略沿用定高环模式。 */
+
+/* ── 定点环配置结构体 ──
+ * PID 增益（kp/ki）不在这里：与别的环一致，在 main.c 用 Set_PID 调参；
+ * 这里收定点环专属参数（节拍/高度窗/死区/限幅/抗扰）。
+ * 默认值由 Control.c 的 Pos_Config_Init() 加载，需要时可在 main.c 覆盖个别字段。 */
+typedef struct
+{
+    /* ── 节拍 ── */
+    uint8_t  loop_div;             /* 500Hz 内分频 → 定点节拍（5 → 100Hz，与定高环一致） */
+    float    loop_dt_s;            /* 定点环固定步长（PID dt） */
+
+    /* ── 生效高度窗（光流在低空/高空误差大，与定高量程一致） ── */
+    float    height_min_m;         /* 生效最低高度：低于此高度贴地噪声大 → 不参与控制 */
+    float    height_max_m;         /* 生效最高高度：高于此高度标定失效 → 不参与控制 */
+
+    /* ── Position_X/Y_Stick_Input 摇杆（不回中，回中=悬停定点） ── */
+    float    rc_max_mps;           /* 满杆 ±100 → ±m/s 速度指令 */
+    int8_t   rc_deadband;          /* 回中死区 ±N，防摇杆回中偏移 */
+
+    /* ── 机体速度估计（光流 × 高度 → m/s） ── */
+    float    vel_lpf_alpha;        /* 速度低通系数（光流噪声大） */
+    float    vel_jump_mps;         /* 单拍速度跳变阈值：超出视为毛刺（本拍不参与控制） */
+    uint8_t  quality_threshold;    /* flow_quality 低于此值视为纹理不可信 → 停用 */
+
+    /* ── 速度环 PI（速度差 → 倾角指令） ── */
+    float    vel_deadband_mps;     /* 速度死区：悬停微差当 0，防抖动 */
+    float    vel_sep_mps;          /* 速度误差超此值暂停积分，防大机动积分污染 */
+    float    i_max;                /* error_sum 上限 */
+    float    out_max_deg;          /* 倾角指令限幅 ±deg（复用串级外环输入，默认 10°） */
+
+    /* ── 抗扰 ── */
+    uint16_t invalid_reanchor_cnt; /* 连续无效/低质量/无新帧计数阈值 → 复位并倾角归零
+                                      （100Hz 下 50 = 0.5s，与定高环一致） */
+
+    /* ── 倾角指令方向（台架测试后确定，+1 或 -1，同 MOTOR_YAW_DIR 模式） ── */
+    float    dir_x;                /* 横向倾角指令方向：Target_Pitch = dir_x × 横向输出 */
+    float    dir_y;                /* 纵向倾角指令方向：Target_Roll  = dir_y × 纵向输出 */
+} Pos_Cfg_t;
+
+/* 定点环运行配置实例（默认值由 PID_Contorl_Init 内的 Pos_Config_Init 加载） */
+extern Pos_Cfg_t s_pos_cfg;
+
+/* 定点环速度环 PID：速度差(m/s) → 倾角指令(deg)，P+I，
+ * 输出经 dir_x/dir_y 方向修正后写入 Target_Pitch/Target_Roll */
+extern PID_TypeDef pid_pos_x;  /* 横向（左/右）速度环 */
+extern PID_TypeDef pid_pos_y;  /* 纵向（前/后）速度环 */
+
+/* ── 定点环遥测（TelemetryTask 调试打印用） ── */
+extern float   Pos_Vx_Mps;   /* 实测横向速度(m/s)：flow_x×高度，正=向右 */
+extern float   Pos_Vy_Mps;   /* 实测纵向速度(m/s)：flow_y×高度，正=向机尾 */
+extern float   Pos_SpX_Mps;  /* 横向速度指令(m/s) */
+extern float   Pos_SpY_Mps;  /* 纵向速度指令(m/s) */
+extern float   Pos_TiltX_Deg;/* 横向倾角指令(deg) */
+extern float   Pos_TiltY_Deg;/* 纵向倾角指令(deg) */
+extern uint8_t Pos_Active;   /* 定点环是否生效（1=输出倾角指令，0=冻结/休眠） */
+
 /* ── 定高环（MTF02P ToF 距离，100Hz，Key==1 解锁 / Key==3 解锁+预设基准时生效） ── */
 
 /* 定高环唯一宏：预设基准油门(DShot 单位)，约悬停油门（实测 400 偏小飞不起来，已调大）。
@@ -160,6 +220,29 @@ void PID_Yaw_Rate_Control(float gyro_z_dps);
  * 锚定时内环积分清零；数据失效/毛刺/无新帧时冻结输出（保持最后一拍油门）。
  */
 void Alt_Control(void);
+
+/*
+ * 定点环控制（100Hz，内部对 500Hz 调用做分频）。
+ *
+ * 仅在解锁状态生效：Key==1（解锁）/ Key==3（解锁+预设基准油门）：
+ *   Position_X/Y_Stick_Input 摇杆 → 速度指令（回中=0=悬停定点，推杆=朝对应方向移动）
+ *   MTF02P 光流 × 高度 → 实测机体速度（低通+毛刺保护）
+ *   速度环 pid_pos_x/pid_pos_y（P+I）：速度差 → 倾角指令（±out_max_deg 限幅）
+ *   倾角指令经 dir_x/dir_y 方向修正写入 Target_Pitch（横向）/Target_Roll（纵向），
+ *   复用 Pitch/Roll 串级外环（PID_Pitch_Roll_Combined）
+ *
+ * 方向约定（用户实测，机头朝上方位）：flow_x 左→右为正 / flow_y 机头→机尾为正；
+ *   Position_X_Stick_Input +100 = 向右（flow_x 正）；Position_Y_Stick_Input +100 =
+ *   向前 = 机尾→机头（flow_y 负）。
+ *
+ * 失效策略（沿用定高环模式）：
+ *   测距/光流无效、flow_quality 低于阈值、无新帧（时间戳不变）、高度出窗：
+ *   本拍冻结（保持最后一拍倾角）；连续超阈值 → 复位并倾角归零（回平，安全）。
+ *   贴地（dist ≤ ground_dist_m）立即归零；恢复有效后首帧重新锚定（PID/低通清零）。
+ * 参数：Pos_Cfg_t 结构体（节拍/高度窗/死区/限幅/抗扰/方向）；
+ * PID 增益与别的环一致，在 main.c 用 Set_PID 调参。
+ */
+void Pos_Control(void);
 
 #ifdef __cplusplus
 }

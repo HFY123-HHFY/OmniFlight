@@ -74,7 +74,8 @@ void App_NRF24L01_TestOnce(void);
  *   RxPacket[2] = Altitude_Stick_Input 回中摇杆（-100~100），Key==3 定高时控高度
  */
 extern volatile int8_t Altitude_Stick_Input; // 定高环摇杆输入（-100~100）
-extern volatile int8_t Position_XY_Stick_Input; // 定点环摇杆输入（-100~100）
+extern volatile int8_t Position_X_Stick_Input; // 定点环X轴摇杆输入（-100~100）
+extern volatile int8_t Position_Y_Stick_Input; // 定点环Y轴摇杆输入（-100~100）
 
 /* 和遥控器交换数据 */
 void NRF24L01_RX_Data(void);   /* 接收数据包：解析遥控指令，Mode==1 置回传请求 */

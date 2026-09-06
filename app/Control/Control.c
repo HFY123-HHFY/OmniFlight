@@ -88,6 +88,48 @@ static void Alt_Config_Init(void)
 }
 
 /* =========================================================================
+ * 定点环（100Hz，MTF02P 光流；Key==1 解锁 / Key==3 解锁+预设基准时生效）
+ *
+ * 结构：Position_X/Y_Stick_Input 摇杆 → 速度指令（回中=0=悬停定点，推杆=移动）
+ *       MTF02P 光流 × 高度 → 实测机体速度（低通 + 毛刺保护）
+ *       速度环 pid_pos_x/y（P+I）→ 倾角指令（±out_max_deg）
+ *       倾角指令经 dir_x/dir_y 方向修正写入 Target_Pitch（横向）/Target_Roll（纵向），
+ *       复用 Pitch/Roll 串级外环（PID_Pitch_Roll_Combined）
+ *
+ * 方向约定（用户实测，机头朝上方位）：
+ *   flow_x 左→右为正 / flow_y 机头→机尾为正；
+ *   Position_X_Stick_Input +100 = 向右（flow_x 正）
+ *   Position_Y_Stick_Input +100 = 向前（机尾→机头，flow_y 负）
+ *
+ * PID 增益与 Pitch/Roll/偏航/定高环一致，在 main.c 用 Set_PID 调参；
+ * 定点环专属参数（节拍/高度窗/死区/限幅/抗扰/方向）收在 Pos_Cfg_t 结构体
+ * （类型见 Control.h，默认值由 Pos_Config_Init 加载）。
+ * ========================================================================= */
+
+Pos_Cfg_t s_pos_cfg;
+
+/* 定点环默认配置 */
+static void Pos_Config_Init(void)
+{
+    s_pos_cfg.loop_div             = 5U;      /* 100Hz，与定高环一致 */
+    s_pos_cfg.loop_dt_s            = 0.01f;
+    s_pos_cfg.height_min_m         = 0.1f;    /* 低空飞行/手持测试为主，放宽到 0.1m（贴地仍由 ground_dist 归零保护） */
+    s_pos_cfg.height_max_m         = 4.0f;    /* 与定高环目标上限一致 */
+    s_pos_cfg.rc_max_mps           = 1.0f;    /* 满杆 ±1m/s */
+    s_pos_cfg.rc_deadband          = 5;
+    s_pos_cfg.vel_lpf_alpha        = 0.30f;   /* 光流单帧噪声大，与定高环速率低通同档 */
+    s_pos_cfg.vel_jump_mps         = 2.0f;    /* 单拍速度跳变毛刺阈值 */
+    s_pos_cfg.quality_threshold    = 40U;     /* flow_quality 低于此值纹理不可信 */
+    s_pos_cfg.vel_deadband_mps     = 0.05f;
+    s_pos_cfg.vel_sep_mps          = 0.8f;
+    s_pos_cfg.i_max                = 5.0f;
+    s_pos_cfg.out_max_deg          = 10.0f;   /* 倾角指令 ±10° */
+    s_pos_cfg.invalid_reanchor_cnt = 50U;     /* 100Hz 下 50 = 0.5s */
+    s_pos_cfg.dir_x                = 1.0f;    /* 台架验证后确定 ±1 */
+    s_pos_cfg.dir_y                = 1.0f;    /* 台架验证后确定 ±1 */
+}
+
+/* =========================================================================
  * PID 对象
  * ========================================================================= */
 PID_TypeDef pid_pitch;
@@ -102,6 +144,12 @@ PID_TypeDef pid_alt;
 /* 定高环：内环（速率差→油门修正） */
 PID_TypeDef pid_alt_rate;
 
+/* 定点环：横向速度环（速度差→横向倾角） */
+PID_TypeDef pid_pos_x;
+
+/* 定点环：纵向速度环（速度差→纵向倾角） */
+PID_TypeDef pid_pos_y;
+
 /* 目标高度(m)：由 Altitude_Stick_Input 摇杆积分，回中冻结 */
 float Alt_Target_M = 0.0f;
 
@@ -115,6 +163,15 @@ float Alt_Throttle_Out = 0.0f;
 
 /* 偏航角速度环对象 */
 PID_TypeDef pid_rate_yaw;
+
+/* ── 定点环遥测（TelemetryTask 调试打印用） ── */
+float   Pos_Vx_Mps    = 0.0f;  /* 实测横向速度(m/s)：flow_x×高度，正=向右 */
+float   Pos_Vy_Mps    = 0.0f;  /* 实测纵向速度(m/s)：flow_y×高度，正=向机尾 */
+float   Pos_SpX_Mps   = 0.0f;  /* 横向速度指令(m/s) */
+float   Pos_SpY_Mps   = 0.0f;  /* 纵向速度指令(m/s) */
+float   Pos_TiltX_Deg = 0.0f;  /* 横向倾角指令(deg) */
+float   Pos_TiltY_Deg = 0.0f;  /* 纵向倾角指令(deg) */
+uint8_t Pos_Active    = 0U;    /* 定点环是否生效（1=输出倾角指令，0=冻结/休眠） */
 
 /* Pitch/Roll 串级对象 */
 static PID_Cascade_t cascade_pitch;
@@ -131,6 +188,13 @@ static uint8_t   s_alt_anchored = 0U;     /* 目标是否已锚定（解锁/回�
 static uint16_t  s_alt_invalid_cnt = 0U;  /* 连续无新帧/无效帧计数（超阈值重锚定） */
 static float     s_alt_last_dist_m = 0.0f; /* 上一帧距离(m)，微分用 */
 static uint32_t  s_alt_last_time_ms = 0U;  /* 上一帧传感器时间戳(ms)：微分 dt + 新鲜度判断用 */
+
+/* ── 定点环内部状态 ─────────────────────────────────────────────── */
+static LPF1_t    pos_vel_x_lpf;           /* 横向速度低通 */
+static LPF1_t    pos_vel_y_lpf;           /* 纵向速度低通 */
+static uint8_t   s_pos_anchored = 0U;     /* 是否已锚定（解锁/恢复后首帧有效数据） */
+static uint16_t  s_pos_invalid_cnt = 0U;  /* 连续无效/无新帧计数（超阈值复位冻结） */
+static uint32_t  s_pos_last_time_ms = 0U; /* 上一帧传感器时间戳(ms)：新鲜度判断 */
 
 /* =========================================================================
  * 内部辅助
@@ -298,6 +362,25 @@ void PID_Contorl_Init(void)
 
 	/* ---- 爬升速率估计低通（距离差分 → 低通） ---- */
 	LPF1_Init(&alt_rate_lpf, s_alt_cfg.rate_lpf_alpha, 0.0f);
+
+	/* ---- 定点环 PID（100Hz，MTF02P 光流；kp/ki 与别的环一样在 main.c Set_PID 调参） ---- */
+	Pos_Config_Init();
+
+	/* 横向速度环：速度差 → 横向倾角（P+I），输出限幅 ±out_max_deg */
+	PID_Init(&pid_pos_x);
+	PID_Init_WithLimit(&pid_pos_x, s_pos_cfg.i_max, s_pos_cfg.out_max_deg);
+	PID_SetDeadband(&pid_pos_x, s_pos_cfg.vel_deadband_mps);
+	PID_SetIntegralSeparation(&pid_pos_x, s_pos_cfg.vel_sep_mps);
+
+	/* 纵向速度环：速度差 → 纵向倾角（P+I） */
+	PID_Init(&pid_pos_y);
+	PID_Init_WithLimit(&pid_pos_y, s_pos_cfg.i_max, s_pos_cfg.out_max_deg);
+	PID_SetDeadband(&pid_pos_y, s_pos_cfg.vel_deadband_mps);
+	PID_SetIntegralSeparation(&pid_pos_y, s_pos_cfg.vel_sep_mps);
+
+	/* ---- 机体速度估计低通（光流 × 高度 → 低通） ---- */
+	LPF1_Init(&pos_vel_x_lpf, s_pos_cfg.vel_lpf_alpha, 0.0f);
+	LPF1_Init(&pos_vel_y_lpf, s_pos_cfg.vel_lpf_alpha, 0.0f);
 }
 
 /* =========================================================================
@@ -327,6 +410,24 @@ void Control_Arm_Reset(float current_gyro_pitch_dps, float current_gyro_roll_dps
 	s_alt_invalid_cnt  = 0U;
 	s_alt_last_dist_m  = 0.0f;
 	s_alt_last_time_ms = 0U;
+
+	/* ---- 定点环重置：倾角指令归零回平，速度低通清零，待重新锚定 ---- */
+	PID_Reset(&pid_pos_x);
+	PID_Reset(&pid_pos_y);
+	LPF1_Init(&pos_vel_x_lpf, s_pos_cfg.vel_lpf_alpha, 0.0f);
+	LPF1_Init(&pos_vel_y_lpf, s_pos_cfg.vel_lpf_alpha, 0.0f);
+	Target_Pitch       = 0.0f;
+	Target_Roll        = 0.0f;
+	Pos_Vx_Mps         = 0.0f;
+	Pos_Vy_Mps         = 0.0f;
+	Pos_SpX_Mps        = 0.0f;
+	Pos_SpY_Mps        = 0.0f;
+	Pos_TiltX_Deg      = 0.0f;
+	Pos_TiltY_Deg      = 0.0f;
+	Pos_Active         = 0U;
+	s_pos_anchored     = 0U;
+	s_pos_invalid_cnt  = 0U;
+	s_pos_last_time_ms = 0U;
 }
 
 /* =========================================================================
@@ -559,4 +660,177 @@ void Alt_Control(void)
 	 *    输出限幅 ±out_max、error_sum 上限 i_max 均由 PID 库保证） ── */
 	PID_SetTarget(&pid_alt_rate, rate_target);
 	Alt_Throttle_Out = PID_CalcDt(&pid_alt_rate, Alt_Rate_Mps, s_alt_cfg.loop_dt_s);
+}
+
+/* =========================================================================
+ * Pos_Freeze — 定点环冻结：复位速度环 + 倾角指令归零（回平，安全）
+ * ========================================================================= */
+static void Pos_Freeze(void)
+{
+	PID_Reset(&pid_pos_x);
+	PID_Reset(&pid_pos_y);
+	Target_Pitch   = 0.0f;
+	Target_Roll    = 0.0f;
+	Pos_TiltX_Deg  = 0.0f;
+	Pos_TiltY_Deg  = 0.0f;
+	Pos_Active     = 0U;
+	s_pos_anchored = 0U;
+}
+
+/* =========================================================================
+ * Pos_Control — 定点环（100Hz）
+ *
+ * 由 ControlTask 在解锁分支（Key==1/3）以 500Hz 调用，内部分频至 100Hz。
+ * 必须在 PID_Pitch_Roll_Combined 之前调用：本环写 Target_Pitch/Target_Roll，
+ * 串级外环随后用最新倾角目标（未到 100Hz 节拍时保持上一拍倾角）。
+ *
+ * 状态分工（与定高环一致，无独立飞行模式）：
+ *   Key==1/3（解锁）：本环生效；Key==2（锁定）：本环不被调用，倾角归零。
+ *
+ * 方向约定（用户实测，机头朝上方位）：
+ *   flow_x 左→右为正 / flow_y 机头→机尾为正；
+ *   Position_X_Stick_Input +100 = 向右（flow_x 正）
+ *   Position_Y_Stick_Input +100 = 向前（机尾→机头，flow_y 负）
+ *   混控矩阵（Motor.c）中 pitch 项驱动左/右差速（横向）、roll 项驱动前/后差速
+ *   （纵向），故横向 → Target_Pitch、纵向 → Target_Roll；dir_x/dir_y 为方向修正。
+ *
+ * 数据一致性：distance/time_ms 为 uint32 单字、flow_x/flow_y 为 int16 单字、
+ * MTF02P_IsRangeValid()/IsFlowValid() 读单字节，均原子可安全直读；
+ * 跨帧混读最多差一帧，由速度跳变毛刺保护兜底。
+ *
+ * 失效策略（沿用定高环模式）：
+ *   - 测距/光流无效、flow_quality 低于阈值、无新帧（时间戳不变）、高度出窗：
+ *     本拍冻结（保持最后一拍倾角）；连续超阈值 → 复位并倾角归零（回平，安全）
+ *   - 贴地（dist ≤ ground_dist_m）：立即归零（起飞/落地阶段电机姿态中立）
+ *   - 恢复有效后首帧重新锚定：PID/低通清零，速度低通用当前值播种（无冲击恢复）
+ * ========================================================================= */
+void Pos_Control(void)
+{
+	static uint8_t div = 0U;
+
+	float    dist_m;
+	float    vx_raw;
+	float    vy_raw;
+	float    sp_x;
+	float    sp_y;
+	uint8_t  range_valid;
+	uint8_t  flow_valid;
+	uint32_t dist_mm;
+	uint32_t sensor_time_ms;
+	int8_t   sx;
+	int8_t   sy;
+
+	/* ── 非解锁状态（Key==2 等）：定点环休眠，倾角指令归零 ── */
+	if ((Key != 1U) && (Key != 3U))
+	{
+		Target_Pitch   = 0.0f;
+		Target_Roll    = 0.0f;
+		Pos_TiltX_Deg  = 0.0f;
+		Pos_TiltY_Deg  = 0.0f;
+		Pos_Active     = 0U;
+		s_pos_anchored = 0U;
+		return;
+	}
+
+	div++;
+	if (div < s_pos_cfg.loop_div)
+	{
+		return;   /* 100Hz 降采样（未到节拍：保持上一拍倾角目标） */
+	}
+	div = 0U;
+
+	sensor_time_ms = mtf02p_data.time_ms;
+	dist_mm        = mtf02p_data.distance;
+	range_valid    = MTF02P_IsRangeValid();
+	flow_valid     = MTF02P_IsFlowValid();
+	dist_m         = (float)dist_mm / 1000.0f;
+
+	/* ── 贴地/测距无效：立即归零（起飞前/落地后姿态中立，不等计数阈值） ── */
+	if ((range_valid == 0U) || (dist_mm == 0U) || (dist_m <= s_alt_cfg.ground_dist_m))
+	{
+		Pos_Freeze();
+		return;
+	}
+
+	/* ── 有效性：光流无效/质量低/无新帧（时间戳没变，传感器冻结）/高度出窗 →
+	 *    本拍冻结（保持最后一拍倾角）；连续超阈值 → 复位并归零 ── */
+	if ((flow_valid == 0U) ||
+	    (mtf02p_data.flow_quality < s_pos_cfg.quality_threshold) ||
+	    (sensor_time_ms == s_pos_last_time_ms) ||
+	    (dist_m < s_pos_cfg.height_min_m) || (dist_m > s_pos_cfg.height_max_m))
+	{
+		s_pos_invalid_cnt++;
+		if (s_pos_invalid_cnt > s_pos_cfg.invalid_reanchor_cnt)
+		{
+			s_pos_invalid_cnt = (uint16_t)(s_pos_cfg.invalid_reanchor_cnt + 1U); /* 封顶防回绕 */
+			Pos_Freeze();
+		}
+		return;
+	}
+	s_pos_invalid_cnt = 0U;
+
+	/* ── 机体速度估计：光流 cm/s@1m × 高度(m) / 100 → m/s。
+	 *    正=向右（flow_x）/ 正=向机尾（flow_y），用户实测方向约定 ── */
+	vx_raw = (float)mtf02p_data.flow_x * dist_m / 100.0f;
+	vy_raw = (float)mtf02p_data.flow_y * dist_m / 100.0f;
+
+	/* ── 锚定：恢复有效后的首帧 → PID/低通清零 + 速度低通播种当前值，
+	 *    本拍不参与控制，下一拍正常进入（无冲击恢复） ── */
+	if (s_pos_anchored == 0U)
+	{
+		PID_Reset(&pid_pos_x);
+		PID_Reset(&pid_pos_y);
+		LPF1_Init(&pos_vel_x_lpf, s_pos_cfg.vel_lpf_alpha, vx_raw);
+		LPF1_Init(&pos_vel_y_lpf, s_pos_cfg.vel_lpf_alpha, vy_raw);
+		Pos_Vx_Mps        = vx_raw;
+		Pos_Vy_Mps        = vy_raw;
+		s_pos_last_time_ms = sensor_time_ms;
+		s_pos_anchored    = 1U;
+		return;
+	}
+
+	/* ── 毛刺保护：单拍速度跳变超阈值视为假数据，本拍不参与控制（倾角保持）；
+	 *    速度低通不吸收毛刺，下一帧即可恢复 ── */
+	if ((vx_raw > (Pos_Vx_Mps + s_pos_cfg.vel_jump_mps)) ||
+	    (vx_raw < (Pos_Vx_Mps - s_pos_cfg.vel_jump_mps)) ||
+	    (vy_raw > (Pos_Vy_Mps + s_pos_cfg.vel_jump_mps)) ||
+	    (vy_raw < (Pos_Vy_Mps - s_pos_cfg.vel_jump_mps)))
+	{
+		return;
+	}
+
+	Pos_Vx_Mps = LPF1_Update(&pos_vel_x_lpf, vx_raw);
+	Pos_Vy_Mps = LPF1_Update(&pos_vel_y_lpf, vy_raw);
+	s_pos_last_time_ms = sensor_time_ms;
+	Pos_Active = 1U;
+
+	/* ── Position_X/Y_Stick_Input → 速度指令（回中死区，回中=0=悬停定点）。
+	 *   摇杆约定：X +100=向右（flow_x 正）；Y +100=向前（flow_y 负，取负号） ── */
+	sp_x = 0.0f;
+	sp_y = 0.0f;
+	sx   = Position_X_Stick_Input;
+	sy   = Position_Y_Stick_Input;
+	if ((sx > s_pos_cfg.rc_deadband) || (sx < -s_pos_cfg.rc_deadband))
+	{
+		sp_x = (float)sx * (s_pos_cfg.rc_max_mps / 100.0f);
+	}
+	if ((sy > s_pos_cfg.rc_deadband) || (sy < -s_pos_cfg.rc_deadband))
+	{
+		sp_y = -(float)sy * (s_pos_cfg.rc_max_mps / 100.0f);
+	}
+	Pos_SpX_Mps = sp_x;
+	Pos_SpY_Mps = sp_y;
+
+	/* ── 速度环 PI：速度差 → 倾角指令（P 瞬态出力，I 学稳态风扰差额；
+	 *    输出限幅 ±out_max_deg、error_sum 上限 i_max 均由 PID 库保证） ── */
+	PID_SetTarget(&pid_pos_x, sp_x);
+	Pos_TiltX_Deg = PID_CalcDt(&pid_pos_x, Pos_Vx_Mps, s_pos_cfg.loop_dt_s);
+	PID_SetTarget(&pid_pos_y, sp_y);
+	Pos_TiltY_Deg = PID_CalcDt(&pid_pos_y, Pos_Vy_Mps, s_pos_cfg.loop_dt_s);
+
+	/* ── 倾角指令 → 姿态目标（复用 Pitch/Roll 串级外环）：
+	 *   混控矩阵中 pitch 项驱动左/右差速（横向）、roll 项驱动前/后差速（纵向），
+	 *   故横向 → Target_Pitch、纵向 → Target_Roll；dir_x/dir_y 台架验证后确定 ── */
+	Target_Pitch = s_pos_cfg.dir_x * Pos_TiltX_Deg;
+	Target_Roll  = s_pos_cfg.dir_y * Pos_TiltY_Deg;
 }

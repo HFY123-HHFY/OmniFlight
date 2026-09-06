@@ -333,7 +333,8 @@ uint8_t NRF24L01_Send(void)
 	NRF24L01_WriteTxPayload(NRF24L01_TxPacket, NRF24L01_TX_PACKET_WIDTH);
 	NRF24L01_Tx();
 
-	timeout = 10000U;
+	/* 无 ACK 时不能长时间占用 RadioTask；每次轮询间隔 10us，最多等待约 50ms。 */
+	timeout = 5000U;
 	while (1)
 	{
 		status = NRF24L01_ReadStatus();
@@ -362,6 +363,8 @@ uint8_t NRF24L01_Send(void)
 			sendFlag = 1U;
 			break;
 		}
+
+		Delay_us(10U);
 	}
 
 	NRF24L01_WriteReg(NRF24L01_STATUS, 0x30U);
@@ -430,8 +433,10 @@ void App_NRF24L01_TestOnce(void)
 static uint8_t SendFlag = 0;						//发送标志位
 static uint8_t ReceiveFlag = 0;						//接收标志位
 static uint8_t s_telemetryRequest = 0;				//遥控器回传请求标志
+
 volatile int8_t Altitude_Stick_Input = 0; // 定高环摇杆输入（-100~100）
-volatile int8_t Position_XY_Stick_Input = 0; // 定点环摇杆输入（-100~100）
+volatile int8_t Position_X_Stick_Input = 0; // 定点环X轴摇杆输入（-100~100）
+volatile int8_t Position_Y_Stick_Input = 0; // 定点环Y轴摇杆输入（-100~100）
 
 volatile uint8_t NRF24L01_Linked = 0U;
 static uint16_t s_linkMissCount = 0U;
@@ -470,8 +475,9 @@ void NRF24L01_RX_Data(void)
 	uint16_t rx_duty = (uint16_t)(DSHOT_THROTTLE_MIN +
 		(((uint32_t)NRF24L01_RxPacket[1] * (PWM_DUTY_MAX - DSHOT_THROTTLE_MIN)) / 250U));
 
-	Altitude_Stick_Input = (int8_t)NRF24L01_RxPacket[2];
-	Position_XY_Stick_Input = (int8_t)NRF24L01_RxPacket[3];
+	Altitude_Stick_Input   = (int8_t)NRF24L01_RxPacket[2];
+	Position_X_Stick_Input = (int8_t)NRF24L01_RxPacket[3];
+	Position_Y_Stick_Input = (int8_t)NRF24L01_RxPacket[4];
 
 	//油门摇杆：Key==1 解锁时直接参与混控（base = speed_temp + 定高环偏差）
 	speed_temp = rx_duty;
