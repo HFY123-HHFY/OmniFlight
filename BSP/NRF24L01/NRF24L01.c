@@ -430,7 +430,9 @@ void App_NRF24L01_TestOnce(void)
 static uint8_t SendFlag = 0;						//发送标志位
 static uint8_t ReceiveFlag = 0;						//接收标志位
 static uint8_t s_telemetryRequest = 0;				//遥控器回传请求标志
-volatile int8_t R_H = 0; // 右边摇杆纵向偏移量（-100~100）
+volatile int8_t Altitude_Stick_Input = 0; // 定高环摇杆输入（-100~100）
+volatile int8_t Position_XY_Stick_Input = 0; // 定点环摇杆输入（-100~100）
+
 volatile uint8_t NRF24L01_Linked = 0U;
 static uint16_t s_linkMissCount = 0U;
 
@@ -468,7 +470,8 @@ void NRF24L01_RX_Data(void)
 	uint16_t rx_duty = (uint16_t)(DSHOT_THROTTLE_MIN +
 		(((uint32_t)NRF24L01_RxPacket[1] * (PWM_DUTY_MAX - DSHOT_THROTTLE_MIN)) / 250U));
 
-	R_H  = (int8_t)NRF24L01_RxPacket[2];
+	Altitude_Stick_Input = (int8_t)NRF24L01_RxPacket[2];
+	Position_XY_Stick_Input = (int8_t)NRF24L01_RxPacket[3];
 
 	//油门摇杆：Key==1 解锁时直接参与混控（base = speed_temp + 定高环偏差）
 	speed_temp = rx_duty;
@@ -486,9 +489,13 @@ void NRF24L01_TX_Data(void)
 	//姿态数据
 	*(float *)&NRF24L01_TxPacket[0] = Pitch; // 占用0，1，2，3
 	*(float *)&NRF24L01_TxPacket[4] = Roll;  // 占用4，5，6，7
-	*(float *)&NRF24L01_TxPacket[8] = pid_rate_pitch.output; // 占用8，9，10，11
-	*(float *)&NRF24L01_TxPacket[12] = pid_rate_roll.output; // 占用12，13，14，15
-	*(uint32_t *)&NRF24L01_TxPacket[16] = mtf02p_data.distance; // 占用16，17，18，19
+
+	/* 距离数据 */
+	*(uint32_t *)&NRF24L01_TxPacket[8] = mtf02p_data.distance; // 占用8，9，10，11
+
+	/* 光流数据 */
+	*(int16_t *)&NRF24L01_TxPacket[12] = mtf02p_data.flow_x; // 占用12，13
+	*(int16_t *)&NRF24L01_TxPacket[14] = mtf02p_data.flow_y; // 占用14，15
 
 	SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
 }

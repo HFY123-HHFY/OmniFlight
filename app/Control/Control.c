@@ -5,7 +5,7 @@
 #include "My_Usart/My_Usart.h"          /* usart_printf */
 #include "KEY.h"
 #include "MTF02P.h"                     /* mtf02p_data / MTF02P_IsRangeValid（定高环） */
-#include "NRF24L01.h"                   /* R_H 摇杆（定高环） */
+#include "NRF24L01.h"                   /* Altitude_Stick_Input 摇杆（定高环） */
 
 /* =========================================================================
  * 目标姿态
@@ -48,11 +48,11 @@ static uint8_t s_gyro_bias_ready = 0U;
 /* =========================================================================
  * 定高环（100Hz，MTF02P ToF 距离；Key==1 解锁 / Key==3 解锁+预设基准时生效）
  *
- * 结构：R_H 摇杆 → 速率指令积分进 Alt_Target_M（回中冻结 = 保持当前高度）
+ * 结构：Altitude_Stick_Input → 速率指令积分进 Alt_Target_M（回中冻结 = 保持当前高度）
  *       高度外环（纯 P）→ 爬升速率目标（+ 摇杆前馈，限幅）
  *       速率内环（P+I）→ 油门偏差输出 Alt_Throttle_Out（±out_max）
  *   混控 base（Motor.c）：
- *     Key==1 解锁      = speed_temp + Alt_Throttle_Out（油门摇杆打底，R_H 定高环出偏差）
+ *     Key==1 解锁      = speed_temp + Alt_Throttle_Out（油门摇杆打底，Altitude_Stick_Input 定高环出偏差）
  *     Key==3 解锁+预设 = ALT_DEV_OUT_MAX + Alt_Throttle_Out（预设基准出大力，
  *                       PID 只出偏差修正）
  *     Key==2 锁定      = 停机（本环不被调用，Motor_Test 缓降并清零输出）
@@ -102,7 +102,7 @@ PID_TypeDef pid_alt;
 /* 定高环：内环（速率差→油门修正） */
 PID_TypeDef pid_alt_rate;
 
-/* 目标高度(m)：由 R_H 摇杆积分，回中冻结 */
+/* 目标高度(m)：由 Altitude_Stick_Input 摇杆积分，回中冻结 */
 float Alt_Target_M = 0.0f;
 
 /* 实测爬升速率(m/s)：距离差分+低通 */
@@ -428,7 +428,7 @@ void PID_Yaw_Rate_Control(float gyro_z_dps)
  *   - Key==3（解锁+预设）：混控 base = ALT_DEV_OUT_MAX + Alt_Throttle_Out
  *     （预设基准油门出大力，PID 只出偏差修正）
  *   - Key==2（锁定）：本环不被调用，Motor_Test 缓降并清零输出
- *   R_H 推杆 → 速率积分进目标高度，回中冻结目标 = 保持当前高度。
+ *   Altitude_Stick_Input 推杆 → 速率积分进目标高度，回中冻结目标 = 保持当前高度。
  *
  * 数据一致性：distance/time_ms 为 uint32 单字、MTF02P_IsRangeValid() 读单字节，
  * 均原子可安全直读；跨帧混读最多差一帧，由跳变毛刺保护兜底。
@@ -489,7 +489,7 @@ void Alt_Control(void)
 	dist_m = (float)dist_mm / 1000.0f;
 
 	/* ── 锚定：首帧有效数据 → 只做状态初始化（PID/低通清零 + 微分参考值播种）。
-	 *    目标高度 t 不锚定距离 —— t 完全由 R_H 摇杆积分控制，
+	 *    目标高度 t 不锚定距离 —— t 完全由 Altitude_Stick_Input 摇杆积分控制，
 	 *    静止/拿动时 t 不会跟随距离跳变。 */
 	if (s_alt_anchored == 0U)
 	{
@@ -524,9 +524,9 @@ void Alt_Control(void)
 
 	Alt_Rate_Mps = LPF1_Update(&alt_rate_lpf, diff_m / dt_s);
 
-	/* ── R_H 摇杆 → 速率指令（回中死区） ── */
+	/* ── Altitude_Stick_Input → 速率指令（回中死区） ── */
 	rc_rate = 0.0f;
-	rh      = R_H;
+	rh      = Altitude_Stick_Input;
 	if ((rh > s_alt_cfg.rc_deadband) || (rh < -s_alt_cfg.rc_deadband))
 	{
 		rc_rate = (float)rh * (s_alt_cfg.rc_max_rate / 100.0f);
@@ -540,7 +540,7 @@ void Alt_Control(void)
 
 	/* ── 地面死区：dist ≤ ground_dist_m（ToF 量程下限，实测地面恒读 20mm）= 飞控在地面 ──
 	 * 高度误差不参与（防落地后继续转桨/地面自爬升），内环清零输出归零；
-	 * 摇杆前馈保留 → 推 R_H 直接经速率内环 P 出油门起飞，回中电机静止在 base。 */
+	 * 摇杆前馈保留 → 推 Altitude_Stick_Input 直接经速率内环 P 出油门起飞，回中电机静止在 base。 */
 	if (dist_m <= s_alt_cfg.ground_dist_m)
 	{
 		PID_Reset(&pid_alt_rate);

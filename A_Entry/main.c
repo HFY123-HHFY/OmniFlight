@@ -141,7 +141,7 @@ int main(void)
 	/* 定高环（Key==1 解锁 / Key==3 解锁+预设基准 ALT_DEV_OUT_MAX）：
 	 * 外环纯 P（高度差→速率目标）；内环 P+I（速率差→油门偏差输出）。
 	 * 其余参数（节拍/死区/限幅/抗扰）见 Control.h 的 Alt_Cfg_t 结构体（默认值 Alt_Config_Init）。
-	 * 注：实测 400/100 拉满 R_H 飞不起来，已放大；仍不够就继续加 kp */
+	 * 注：实测 400/100 拉满 Altitude_Stick_Input 飞不起来，已放大；仍不够就继续加 kp */
 	Set_PID(&pid_alt,        1.0f, 0.0f, 0.0f);
 	Set_PID(&pid_alt_rate, 600.0f, 150.0f, 0.0f);
 

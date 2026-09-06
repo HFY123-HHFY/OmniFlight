@@ -40,7 +40,7 @@ extern PID_TypeDef pid_rate_yaw;
 /* ── 定高环（MTF02P ToF 距离，100Hz，Key==1 解锁 / Key==3 解锁+预设基准时生效） ── */
 
 /* 定高环唯一宏：预设基准油门(DShot 单位)，约悬停油门（实测 400 偏小飞不起来，已调大）。
- * Key==3 = Key==1（解锁，R_H 控高度）+ 把本基准喂进混控 base，PID 只出偏差修正（不累）；
+ * Key==3 = Key==1（解锁，Altitude_Stick_Input 控高度）+ 把本基准喂进混控 base，PID 只出偏差修正（不累）；
  * Key==1 有油门摇杆 speed_temp 打底（base = speed_temp + 偏差输出），不经本基准。
  * 改这一个宏 = 改给高度环的基准油门。 */
 #define ALT_DEV_OUT_MAX (600.0f)
@@ -55,7 +55,7 @@ typedef struct
     uint8_t  loop_div;             /* 500Hz 内分频 → 定高节拍（5 → 100Hz） */
     float    loop_dt_s;            /* 定高环固定步长 10ms（PID dt） */
 
-    /* ── R_H 摇杆 ── */
+    /* ── Altitude_Stick_Input 摇杆 ── */
     float    rc_max_rate;          /* 满杆 ±100 → ±m/s 速率指令 */
     int8_t   rc_deadband;          /* 回中死区 ±N，防摇杆回中偏移 */
 

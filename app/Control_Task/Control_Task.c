@@ -228,17 +228,17 @@ static void TelemetryTask(void *pvParameters)
 		// usart_printf(USART1, "gz=%.1f dps yaw_out=%.1f\r\n",
 		//              (double)((float)gyroz / GYRO_SENS_2000DPS),
 		//              (double)pid_rate_yaw.output);                    /* 偏航环调试打印 */
-		usart_printf(USART1, "d=%.2f t=%.2f v=%.2f out=%.0f RH=%d\r\n",
-		             (double)((float)mtf02p_data.distance / 1000.0f),
-		             (double)Alt_Target_M, (double)Alt_Rate_Mps,
-		             (double)Alt_Throttle_Out, R_H);           /* 定高环调试打印 */
+		// usart_printf(USART1, "d=%.2f t=%.2f v=%.2f out=%.0f RH=%d\r\n",
+		//              (double)((float)mtf02p_data.distance / 1000.0f),
+		//              (double)Alt_Target_M, (double)Alt_Rate_Mps,
+		//              (double)Alt_Throttle_Out, Altitude_Stick_Input); /* 定高环调试打印 */
 		// usart_printf(USART1, "dist=%lu mm flow=(%d,%d) q=%u st=%u/%u\r\n",
 		//              (unsigned long)mtf02p_data.distance,
 		//              mtf02p_data.flow_x, mtf02p_data.flow_y,
 		//              mtf02p_data.flow_quality,
 		//              mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
-		// usart_printf(USART1, "Key=%d speed_temp=%d R_H=%d\r\n", Key, speed_temp, R_H); /* NRF24L01测试打印 */
-
+		// usart_printf(USART1, "Key=%d speed_temp=%d Altitude_Stick_Input=%d\r\n", Key, speed_temp, Altitude_Stick_Input); /* NRF24L01测试打印 */
+		usart_printf(USART1, "x=%d, y=%d, R_H=%d\r\n",  mtf02p_data.flow_x, mtf02p_data.flow_y, Position_XY_Stick_Input);
 		/* 每 1s 打印一次各任务栈剩余水位（字）：哪个任务逼近 0 就是卡死隐患 */
 		// {
 		// 	static uint8_t wmCount = 0U;

@@ -141,13 +141,13 @@ static void Motor_MixWithDesaturation(float base, float pitch, float roll, float
  * Key == 1: 解锁飞行
  *   - base = speed_temp + Alt_Throttle_Out：
  *     油门摇杆直接打底给油（推多少给多少），Alt_Throttle_Out 为
- *     R_H 定高环 P+I 偏差修正，叠加在摇杆基准上
+ *     Altitude_Stick_Input 定高环 P+I 偏差修正，叠加在摇杆基准上
  *
  * Key == 3: 解锁 + 预设基准油门
  *   - base = ALT_DEV_OUT_MAX + Alt_Throttle_Out：
  *     预设基准（约悬停油门）出大力，Alt_Throttle_Out 为定高环 P+I
  *     偏差修正，PID 只出偏差（不累）；speed_temp 不参与；
- *   R_H 回中摇杆经定高环控高度（Key==1/3 均生效）。
+ *   Altitude_Stick_Input 回中摇杆经定高环控高度（Key==1/3 均生效）。
  *
  * Key == 1/3 共用：
  *   - 三轴角速度 PID 输出作姿态修正
@@ -170,15 +170,16 @@ void Motor_Test(void)
     {
         /*
          * base 按 Key 状态决定（由遥控器切换）：
-         *   Key==1 解锁      = speed_temp + Alt_Throttle_Out
-         *     —— 油门摇杆直接打底给油，R_H 定高环在摇杆基准上出偏差修正
+         *   Key==1 解锁      = Alt_Throttle_Out
+         *     —— 油门摇杆直接打底给油，Altitude_Stick_Input 定高环在摇杆基准上出偏差修正
          *   Key==3 解锁+预设 = ALT_DEV_OUT_MAX + Alt_Throttle_Out
          *     —— 预设基准油门出大力，PID 只出偏差修正（speed_temp 不参与）
          *
          * 油门补偿：高油门时 PID 输出权重自动提升，
          * 防止姿态控制力被淹没在大油门输出中。
          */
-        float base = (float)speed_temp + Alt_Throttle_Out;
+        // float base = (float)speed_temp + Alt_Throttle_Out;
+        float base = Alt_Throttle_Out;
         if (Key == 3)
         {
             base = ALT_DEV_OUT_MAX + Alt_Throttle_Out;
