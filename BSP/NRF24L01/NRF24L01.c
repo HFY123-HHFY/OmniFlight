@@ -5,6 +5,7 @@
 #include "gpio.h"
 #include "Motor.h"
 #include "MTF02P.h"
+#include "Control/Control.h"   /* Alt_Active / Pos_Active（遥测回传用） */
 
 /*
  * NRF24L01 模块私有状态：
@@ -502,6 +503,13 @@ void NRF24L01_TX_Data(void)
 	/* 光流数据 */
 	*(int16_t *)&NRF24L01_TxPacket[12] = mtf02p_data.flow_x; // 占用12，13
 	*(int16_t *)&NRF24L01_TxPacket[14] = mtf02p_data.flow_y; // 占用14，15
+
+	/* 定高环/定点环生效标志：1=生效中，0=休眠/未锚定/贴地（飞控侧实时状态） */
+	NRF24L01_TxPacket[16] = Alt_Active;  // 占用16
+	NRF24L01_TxPacket[17] = Pos_Active;  // 占用17
+	NRF24L01_TxPacket[18] = mtf02p_data.flow_quality; // 占用18：光流质量（≥40 才生效）
+	NRF24L01_TxPacket[19] = mtf02p_data.flow_status;  // 占用19：光流状态（1=可用）
+	NRF24L01_TxPacket[20] = mtf02p_data.tof_status;   // 占用20：测距状态（1=可用）
 
 	SendFlag = NRF24L01_Send(); // 发送数据包，并获取发送状态
 }

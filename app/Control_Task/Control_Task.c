@@ -238,16 +238,14 @@ static void TelemetryTask(void *pvParameters)
 		//              mtf02p_data.flow_quality,
 		//              mtf02p_data.tof_status, mtf02p_data.flow_status);  /* MTF02P 测试打印 */
 		// usart_printf(USART1, "Key=%d speed_temp=%d Altitude_Stick_Input=%d\r\n", Key, speed_temp, Altitude_Stick_Input); /* NRF24L01测试打印 */
-		usart_printf(USART1, "A=%u q=%u h=%.1f s=(%d,%d) t=(%.1f,%.1f) e=(%.2f,%.2f) p=(%.1f,%.1f) i=(%.1f,%.1f) v=(%.2f,%.2f)\r\n",
+		usart_printf(USART1, "A=%u q=%u h=%.1f pe=(%.2f,%.2f) pt=(%.2f,%.2f) sp=(%.2f,%.2f) t=(%.1f,%.1f)\r\n",
 		             Pos_Active,
 		             mtf02p_data.flow_quality,
 		             (double)((float)mtf02p_data.distance / 1000.0f),
-		             Position_X_Stick_Input, Position_Y_Stick_Input,
-		             (double)Pos_TiltX_Deg, (double)Pos_TiltY_Deg,
-		             (double)pid_pos_x.error0, (double)pid_pos_y.error0,
-		             (double)pid_pos_x.P_out, (double)pid_pos_y.P_out,
-		             (double)pid_pos_x.I_out, (double)pid_pos_y.I_out,
-		             (double)Pos_Vx_Mps, (double)Pos_Vy_Mps); /* 定点环调试打印：A=生效 q=光流质量 h=高度 s=摇杆原始值 t=倾角输出(PID输出,p+i限幅后) e=速度误差 p=P项 i=I项 v=实测速度 */
+		             (double)Pos_EstX_M, (double)Pos_EstY_M,
+		             (double)Pos_TarX_M, (double)Pos_TarY_M,
+		             (double)Pos_SpX_Mps, (double)Pos_SpY_Mps,
+		             (double)Pos_TiltX_Deg, (double)Pos_TiltY_Deg); /* 定点环调试打印：A=生效 q=光流质量(≥40生效) h=高度(0.1~4.0m窗内) pe=位置估计(跟着手的位移走) pt=位置目标(摇杆积分,回中冻结) sp=速度指令(位置外环+前馈) t=倾角输出；调速度内环时再补 e/p/i/v */
 		/* 每 1s 打印一次各任务栈剩余水位（字）：哪个任务逼近 0 就是卡死隐患 */
 		// {
 		// 	static uint8_t wmCount = 0U;

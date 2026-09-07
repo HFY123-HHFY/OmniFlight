@@ -6,20 +6,20 @@
 
 OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整的四轴飞控。
 
-- Enroll 注册层 + X-Macro 编译期映射，让飞控算法与芯片底层解耦（可移植架构）
-- 复用 OmniLayer 的 CMake + GCC + OpenOCD 全工具链
-- 积累的 PID、滤波器、传感器驱动、混控算法可复用于后续机器人项目
+- 🧩 Enroll 注册层 + X-Macro 编译期映射，让飞控算法与芯片底层解耦（可移植架构）
+- 🛠️ 复用 OmniLayer 的 CMake + GCC + OpenOCD 全工具链
+- 🧰 积累的 PID、滤波器、传感器驱动、混控算法可复用于后续机器人项目
 
 ## ✨ 亮点
 
 - 🧭 **可移植架构** — 算法与芯片解耦，曾移植验证 F103 / MSPM0G3507（见归档 tag）
 - 🧱 **八层架构** — A_Entry / app / BSP / Enroll / API / Core / SYSTEM / Drivers 职责分明
 - 🖥️ **FreeRTOS 实时内核** — 6 任务 + 信号量 + 互斥锁，抢占式调度接管裸机控制链
-- 🎛️ **串级 PID** — 外环角度 + 内环角速度（Pitch/Roll）+ 偏航角速度环（gyro_z 消除自旋）+ 定高环（MTF02P ToF 距离，✅ 已实测定高）+ 定点环（MTF02P 光流速度环 → 倾角指令，🧪 已接入待实测），500Hz 控制节拍
+- 🎛️ **串级 PID** — 外环角度 + 内环角速度（Pitch/Roll）+ 偏航角速度环（gyro_z 消除自旋）+ 定高环（MTF02P ToF 距离，✅ 已实测定高）+ 定点环（MTF02P 光流位置+速度串级 → 倾角指令，✅ 已实测定点），500Hz 控制节拍
 - 📡 **姿态测量** — MPU6050 DMP (Pitch/Roll) + gyro_z 零偏校准偏航角速度环
 - 🚌 **DShot300** — 数字油门协议，DMA burst 驱动 4 路无刷电调
 - 🛰️ **2.4G 遥控** — NRF24L01 软件 SPI 无线收发，双向遥测回传
-- 🛸 **光流测距** — MTF-02P Micolink 协议（USART4），距离 mm + 光流速度 cm/s@1m，定高环 + 定点环数据源（定高已实测；定点环已接入待实测）
+- 🛸 **光流测距** — MTF-02P Micolink 协议（USART4），距离 mm + 光流速度 cm/s@1m，定高环 + 定点环数据源（定高/定点均已实测）
 - ⚙️ **注册层（Enroll）** — X-Macro 编译期映射，换 MCU 只改一张配置表
 - 🚌 **软件总线** — I2C/SPI 协议与底层分离，速率集中配置
 
@@ -27,16 +27,16 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 
 | 项目 | 型号 | 接口 |
 |------|------|------|
-| 主控 | STM32F407VET6 | Cortex-M4 + FPU, 168MHz |
-| 陀螺仪 | MPU6050 | I2C + EXTI |
-| 磁力计 | QMC5883P | I2C（驱动保留，当前未启用） |
-| 气压计 | BMP280 | I2C（驱动保留，当前未启用） |
-| 无线 | NRF24L01 | 软件 SPI |
-| 光流测距 | MTF-02P | USART4 115200（Micolink） |
-| 电调 | BLHeli_S / BLHeli_32 | DShot300 |
-| 蜂鸣器 | 无源 | TIM3 CH4 PWM |
+| 🧠 主控 | STM32F407VET6 | Cortex-M4 + FPU, 168MHz |
+| 🧭 陀螺仪 | MPU6050 | I2C + EXTI |
+| 🧲 磁力计 | QMC5883P | I2C（驱动保留，当前未启用） |
+| 🌡️ 气压计 | BMP280 | I2C（驱动保留，当前未启用） |
+| 📡 无线 | NRF24L01 | 软件 SPI |
+| 🛸 光流测距 | MTF-02P | USART4 115200（Micolink） |
+| ⚡ 电调 | BLHeli_S / BLHeli_32 | DShot300 |
+| 🔔 蜂鸣器 | 无源 | TIM3 CH4 PWM |
 
-### 引脚分配
+### 🔌 引脚分配
 
 | 功能 | 引脚 | 外设 |
 |------|------|------|
@@ -51,7 +51,7 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
 | 无线串口 | PD8/PD9 | USART3 |
 | LED 1~3 | PE2/PE3/PE4 | GPIO |
 
-### 机架方位（X 型四轴，以机头朝上为准）
+### 🧭 机架方位（X 型四轴，以机头朝上为准）
 
 ```text
               机头
@@ -63,11 +63,11 @@ OmniFlight = **OmniLayer 架构 × 飞控算法**，在一块 F407 上跑完整�
               机尾
 ```
 
-- 电机编号：1 左前 / 2 右前 / 3 右后 / 4 左后
-- 混控矩阵（Motor.c，飞行已验证）：pitch 项驱动左/右差速（**横向倾角**）、
+- 🛠️ 电机编号：1 左前 / 2 右前 / 3 右后 / 4 左后
+- 🎛️ 混控矩阵（Motor.c，飞行已验证）：pitch 项驱动左/右差速（**横向倾角**）、
   roll 项驱动前/后差速（**纵向倾角**）——故定点环 横向 → Target_Pitch、纵向 → Target_Roll
-- 光流方向（手持实测）：`flow_x` 左→右为正 / `flow_y` 机头→机尾为正
-- 定点摇杆（不回中）：`Position_X_Stick_Input` +100 = 向右（flow_x 正）；
+- 🛸 光流方向（手持实测）：`flow_x` 左→右为正 / `flow_y` 机头→机尾为正
+- 🕹️ 定点摇杆（不回中）：`Position_X_Stick_Input` +100 = 向右（flow_x 正）；
   `Position_Y_Stick_Input` +100 = 向前 = 机尾→机头（flow_y 负）；回中 = 悬停定点
 
 ## 📁 项目结构
@@ -120,8 +120,9 @@ OmniFlight/
 Pitch/Roll 串级 │ 偏航角速度环 (gyro_z 单环, 消除自旋)
                 │ 定高环 (100Hz: Altitude_Stick_Input→积分高度→高度外环→速率内环;
                 │   Key==3 额外注入预设基准油门 ALT_DEV_OUT_MAX)
-                │ 定点环 (100Hz: Position_X/Y 摇杆→速度指令; 光流×高度→实测速度;
-                │   速度环 PI→倾角指令→Target_Pitch/Roll, 复用串级外环)
+                │ 定点环 (100Hz: Position_X/Y 摇杆→速率积分→位置目标; 光流×高度→
+                │   实测速度→积分→位置估计; 位置外环 P→速度内环 PI→倾角指令→
+                │   Target_Pitch/Roll, 复用串级外环)
 
 FreeRTOS 任务模型（6 任务，优先级 6→1）：
   TIM2 ISR ─信号量→ ControlTask(6)  500Hz 串级PID + 偏航角速度环 + 定高环 + 定点环 + 混控
@@ -136,19 +137,19 @@ FreeRTOS 任务模型（6 任务，优先级 6→1）：
   MPU6050 Gyro (500Hz) → gyrox/gyroy → Pitch/Roll 角速度环
   MPU6050 Gyro (500Hz) → gyroz → 偏航角速度环（零偏校准 + 低通 + PID）
   MTF02P (~100Hz) → distance (mm) → 定高环（✅ 已实测；差分+低通估爬升速率）
-  MTF02P (~100Hz) → flow_x/y (cm/s@1m) → 定点环（🧪 已接入待实测，架构见 arch-guide §5.5）
+  MTF02P (~100Hz) → flow_x/y (cm/s@1m) → 定点环（✅ 已实测，架构见 arch-guide §5.5）
 ```
 
 ## 🏆 开发进度（里程碑）
 
 | 里程碑 | 状态 |
 |--------|------|
-| 2.4G 遥控通信（NRF24L01 双向遥测） | ✅ |
-| 串级 PID 正常起飞 | ✅ |
-| 偏航角速度环（gyro_z）消除自旋 | ✅ |
-| LED 控制管理任务（状态指示） | ✅ |
-| **定高环（MTF02P ToF）** | ✅ 2026-09-05 实测 |
-| 🛸 定点环（MTF02P 光流速度环） | 🧪 已接入，待实测（2026-09-06） |
+| 🛰️ 2.4G 遥控通信（NRF24L01 双向遥测） | ✅ |
+| 🚁 串级 PID 正常起飞 | ✅ |
+| 🌀 偏航角速度环（gyro_z）消除自旋 | ✅ |
+| 💡 LED 控制管理任务（状态指示） | ✅ |
+| 🎚️ 定高环（MTF02P ToF）** | ✅ 2026-09-05 实测 |
+| 🛸 定点环（MTF02P 光流位置+速度串级） | ✅ 2026-09-07 实测 |
 
 ## 🎯 中断优先级
 
@@ -173,23 +174,23 @@ cmake --build --preset Debug
 
 ## 📖 详细文档
 
-- 工程架构深度解析：[docs/arch-guide.md](docs/arch-guide.md)
-- 架构框架：[OmniLayer](https://github.com/HFY123-HHFY/OmniLayer.git)
+- 📐 工程架构深度解析：[docs/arch-guide.md](docs/arch-guide.md)
+- 🧩 架构框架：[OmniLayer](https://github.com/HFY123-HHFY/OmniLayer.git)
 
 ## ⚠️ 注意事项
 
-- 目标 MCU：STM32F407VET6（唯一维护目标，专注 F407 + FreeRTOS）
-- 多平台移植（F103 / MSPM0G3507）已归档至 `git tag archive/multi-mcu-f103-g3507`，主分支不再保留
-- DShot 电调需从最低油门（48）逐步递增，不可直接跳到大油门值
-- 上电后需保持飞行器静止 ~5 秒（陀螺 X/Y/Z 三轴零偏校准）
-- 遥控状态由 Key（RxPacket[0]）切换：1=解锁（油门摇杆 speed_temp 打底 + 定高环偏差修正）；2=锁定停机；3=解锁+预设基准（base = ALT_DEV_OUT_MAX + 偏差输出，PID 只出修正不累）
-- 定高环唯一宏 ALT_DEV_OUT_MAX（Control.h）= 预设基准油门（约悬停油门 600，实测 400 飞不起来），改这一处即改基准；其余参数（节拍/死区/限幅/抗扰）在 Control.h 的 Alt_Cfg_t 结构体；PID 增益与别的环一致在 main.c 用 Set_PID 调参
-- 定点环参数在 Control.h 的 Pos_Cfg_t 结构体（节拍/高度窗 0.1~4.0m/死区/限幅/抗扰/方向 dir_x、dir_y）；dir_x/dir_y 默认 +1，台架推杆测试方向反了就翻号；PID 增益在 main.c Set_PID 调参（初始 kp=8.0/ki=0.5）
-- 空中 Key 1↔3 切换会使 base 阶跃 ±ALT_DEV_OUT_MAX，请勿空中切换；Key==1 时油门摇杆 speed_temp 参与打底，Key==3 由预设基准替代
-- 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.10）
-- 只有优先级 ≥5 的中断可调用 FreeRTOS FromISR API；USART 回调内严禁调用
-- MTF-02P 数据语义：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 tof_status / flow_status
+- 🎯 目标 MCU：STM32F407VET6（唯一维护目标，专注 F407 + FreeRTOS）
+- 🗄️ 多平台移植（F103 / MSPM0G3507）已归档至 `git tag archive/multi-mcu-f103-g3507`，主分支不再保留
+- 🚁 DShot 电调需从最低油门（48）逐步递增，不可直接跳到大油门值
+- 🧘 上电后需保持飞行器静止 ~5 秒（陀螺 X/Y/Z 三轴零偏校准）
+- 🔑 遥控状态由 Key（RxPacket[0]）切换：1=解锁（油门摇杆 speed_temp 打底 + 定高环偏差修正）；2=锁定停机；3=解锁+预设基准（base = ALT_DEV_OUT_MAX + 偏差输出，PID 只出修正不累）
+- 🎚️ 定高环唯一宏 ALT_DEV_OUT_MAX（Control.h）= 预设基准油门（约悬停油门 600，实测 400 飞不起来），改这一处即改基准；其余参数（节拍/死区/限幅/抗扰）在 Control.h 的 Alt_Cfg_t 结构体；PID 增益与别的环一致在 main.c 用 Set_PID 调参
+- 🛸 定点环参数在 Control.h 的 Pos_Cfg_t 结构体（节拍/高度窗 0.1~4.0m/满杆 1.5m/s/倾角限幅 12°/死区/限幅/抗扰/方向 dir_x、dir_y）；dir_x/dir_y 默认 +1，台架推杆测试方向反了就翻号；PID 增益在 main.c Set_PID 调参（位置外环 kp=1.0 纯 P / 速度内环 kp=8.0/ki=0.5）
+- ⚠️ 空中 Key 1↔3 切换会使 base 阶跃 ±ALT_DEV_OUT_MAX，请勿空中切换；Key==1 时油门摇杆 speed_temp 参与打底，Key==3 由预设基准替代
+- ⏱️ 软件 I2C/SPI 的 µs 级时序用 Delay(DWT)；任务 ms 级休眠用 vTaskDelay（详见 arch-guide §5.10）
+- 🚦 只有优先级 ≥5 的中断可调用 FreeRTOS FromISR API；USART 回调内严禁调用
+- 📡 MTF-02P 数据语义：distance (mm) 为 0 表示不可用；光流速度单位 cm/s@1m，实际速度 = 光流速度 × 高度(m)；定高定点前先查 tof_status / flow_status
 
 ## 📮 联系
 
-- QQ 邮箱：634591772@qq.com
+- 📧 QQ 邮箱：634591772@qq.com

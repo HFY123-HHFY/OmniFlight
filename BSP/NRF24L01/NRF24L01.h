@@ -68,10 +68,25 @@ void NRF24L01_UpdateRxAddress(void);
 void App_NRF24L01_TestOnce(void);
 
 /*
- * 遥控数据包约定（32 字节，前 3 字节为控制指令）：
- *   RxPacket[0] = Key ：1=解锁（手动油门） 2=锁定停机 3=定高（固定基准 400 + Altitude_Stick_Input 控高度）
- *   RxPacket[1] = 油门 0~250 → speed_temp（非回中摇杆，仅 Key==1 手动状态使用）
- *   RxPacket[2] = Altitude_Stick_Input 回中摇杆（-100~100），Key==3 定高时控高度
+ * 遥控接收数据包约定（32 字节，遥控器 → 飞控）：
+ *   RxPacket[0] = Key ：1=解锁（手动油门） 2=锁定停机 3=解锁+预设基准油门
+ *   RxPacket[1] = 油门 0~250 → speed_temp（仅 Key==1 手动状态使用）
+ *   RxPacket[2] = Altitude_Stick_Input 回中摇杆（-100~100），定高环控高度
+ *   RxPacket[3] = Position_X_Stick_Input（-100~100），定点环横向
+ *   RxPacket[4] = Position_Y_Stick_Input（-100~100），定点环纵向
+ *
+ * 遥测回传数据包约定（32 字节，飞控 → 遥控器，组包见 NRF24L01_TX_Data）：
+ *   TxPacket[0~3]   = Pitch (float, deg)
+ *   TxPacket[4~7]   = Roll  (float, deg)
+ *   TxPacket[8~11]  = mtf02p_data.distance (uint32, mm)
+ *   TxPacket[12~13] = mtf02p_data.flow_x (int16, cm/s@1m)
+ *   TxPacket[14~15] = mtf02p_data.flow_y (int16, cm/s@1m)
+ *   TxPacket[16]    = Alt_Active：定高环是否生效（1=控制中，0=休眠/未锚定/贴地）
+ *   TxPacket[17]    = Pos_Active：定点环是否生效（1=控制中，0=冻结/未锚定/贴地）
+ *   TxPacket[18]    = flow_quality：光流质量（定点环要求 ≥40，暗光/无纹理时骤降）
+ *   TxPacket[19]    = flow_status：光流状态（1=可用）
+ *   TxPacket[20]    = tof_status：测距状态（1=可用）
+ *   其余字节（21~31）保留，遥控器端按此布局解析显示。
  */
 extern volatile int8_t Altitude_Stick_Input; // 定高环摇杆输入（-100~100）
 extern volatile int8_t Position_X_Stick_Input; // 定点环X轴摇杆输入（-100~100）
