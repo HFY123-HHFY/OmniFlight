@@ -1,6 +1,7 @@
 # OmniFlight — 四轴飞控 ✈️
 
 基于 [OmniLayer](https://github.com/HFY123-HHFY/OmniLayer.git) 分层架构框架构建的 STM32F407 四轴飞行控制器。
+🎯 "项目完结 · 已实测稳定定高定点悬停" 
 
 ## 🚀 项目定位
 
