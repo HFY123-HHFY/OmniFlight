@@ -13,6 +13,7 @@
 #include "Motor.h"
 #include "NRF24L01.h"
 #include "MTF02P.h"
+#include "Buzzer.h"
 
 /* ────────────────────────────────────────────────────────────────
  * FreeRTOS 钩子函数（应用层，由内核回调）
@@ -269,10 +270,11 @@ static void TelemetryTask(void *pvParameters)
 }
 
 /* ────────────────────────────────────────────────────────────────
- * LEDTask — LED 状态指示（最低应用优先级 1）
+ * LEDTask — 飞控声光状态提示（最低应用优先级 1）
  *
  * 状态优先级从高到低：断链绿色闪烁、解锁 RGB 交替、锁定红色闪烁、
- * 已连接待命绿色常亮。每次切换状态先关闭全部 LED，避免旧状态残留。
+ * 已连接待命绿色常亮。断链时持续短鸣，待命长鸣 1 秒，解锁短鸣 1 声，
+ * 锁定短鸣 3 声。每次切换状态先关闭全部 LED 和蜂鸣器，避免旧状态残留。
  * ──────────────────────────────────────────────────────────────── */
 static void LEDTask(void *pvParameters)
 {
@@ -280,6 +282,11 @@ static void LEDTask(void *pvParameters)
 	uint8_t effectStep = 0U;
 	uint8_t lastMode = 0xFFU;
 	uint8_t mode;
+	uint8_t soundPhase = 0U;
+	uint8_t soundTicks = 0U;
+	uint8_t lockBeepCount = 0U;
+	uint8_t buzzerOn = 0U;
+	uint8_t modeChanged;
 
 	(void)pvParameters;
 
@@ -302,14 +309,31 @@ static void LEDTask(void *pvParameters)
 			mode = 3U; /* 已连接待命：绿色常亮 */
 		}
 
+		modeChanged = (mode != lastMode) ? 1U : 0U;
 		if (mode != lastMode)
 		{
 			LED_Control(LED1, LED_LOW);
 			LED_Control(LED2, LED_LOW);
 			LED_Control(LED3, LED_LOW);
+			Buzzer_Off();
+			buzzerOn = 0U;
 			tickCount = 0U;
 			effectStep = 0U;
+			soundPhase = 0U;
+			soundTicks = 0U;
+			lockBeepCount = 0U;
 			lastMode = mode;
+
+			/* 进入新状态立即开始提示音，后续节奏由此状态机非阻塞推进。 */
+			if (mode <= 3U)
+			{
+				Buzzer_On();
+				buzzerOn = 1U;
+				if (mode == 2U)
+				{
+					lockBeepCount = 1U;
+				}
+			}
 
 			if (mode == 3U)
 			{
@@ -340,6 +364,82 @@ static void LEDTask(void *pvParameters)
 					LED_Control(LED3, LED_LOW);
 					LED_Control((LED_Id_t)(LED1 + effectStep), LED_HIGH);
 					effectStep = (effectStep + 1U) % 3U;
+				}
+			}
+		}
+
+		/* LEDTask 每 100ms 运行一次；声音节奏以 100ms 为步进，不阻塞控制链。 */
+		if (modeChanged == 0U)
+		{
+			if (mode == 0U)
+			{
+				if (buzzerOn != 0U)
+				{
+					soundTicks++;
+					if (soundTicks >= 1U)
+					{
+						Buzzer_Off();
+						buzzerOn = 0U;
+						soundPhase = 1U;
+						soundTicks = 0U;
+					}
+				}
+				else if (soundPhase == 1U)
+				{
+					soundTicks++;
+					if (soundTicks >= 4U)
+					{
+						Buzzer_On();
+						buzzerOn = 1U;
+						soundPhase = 0U;
+						soundTicks = 0U;
+					}
+				}
+			}
+			else if (mode == 3U)
+			{
+				if (buzzerOn != 0U)
+				{
+					soundTicks++;
+					if (soundTicks >= 10U)
+					{
+						Buzzer_Off();
+						buzzerOn = 0U;
+					}
+				}
+			}
+			else if (mode == 1U)
+			{
+				if (buzzerOn != 0U)
+				{
+					Buzzer_Off();
+					buzzerOn = 0U;
+				}
+			}
+			else if (mode == 2U)
+			{
+				soundTicks++;
+				if ((buzzerOn != 0U) && (soundTicks >= 1U))
+				{
+					Buzzer_Off();
+					buzzerOn = 0U;
+					soundPhase = 1U;
+					soundTicks = 0U;
+				}
+				else if ((buzzerOn == 0U) && (soundPhase == 1U) && (soundTicks >= 2U))
+				{
+					if (lockBeepCount < 3U)
+					{
+						Buzzer_On();
+						buzzerOn = 1U;
+						lockBeepCount++;
+						soundTicks = 0U;
+					}
+					else
+					{
+						soundPhase = 2U;
+						soundTicks = 0U;
+					}
 				}
 			}
 		}
